@@ -1,0 +1,1 @@
+ALTER TABLE public.cron_secrets DISABLE ROW LEVEL SECURITY;

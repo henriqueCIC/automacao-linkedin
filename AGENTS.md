@@ -1,0 +1,6 @@
+- Keep theme state in the shared ThemeProvider and persist the user's selection locally; this keeps every route and toast on the same theme without changing data workflows.
+- Define button hover motion and semantic action variants in the shared Button component; this keeps effects consistent across the application and honors reduced-motion preferences.
+- Derive the welcome name from account metadata, falling back to the email prefix; this avoids displaying the email or inventing a profile name.
+- Prebundle shared tooltip and slot dependencies alongside the template's React dependencies; this prevents late dependency discovery from mixing React module generations in an open preview.
+- Apply theme color transitions only during explicit ThemeProvider toggles and honor reduced motion; this avoids hydration flashes and permanent animation overrides.
+- Persist real collection stages in the same collection_runs row and poll by a user-scoped run ID; this avoids simulated progress and cross-run status confusion.
