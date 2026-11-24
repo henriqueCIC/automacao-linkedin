@@ -73,19 +73,22 @@ function PublicationsPage() {
     if (!loading && !session) void navigate({ to: "/auth" });
   }, [loading, session, navigate]);
 
+  const userId = session?.user.id;
+
   const linkedIn = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["linkedin-status"],
+    enabled: Boolean(userId),
+    queryKey: ["linkedin-status", userId],
     queryFn: () => runStatus({}),
   });
 
   const posts = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["post_drafts", "publicacoes"],
+    enabled: Boolean(userId),
+    queryKey: ["post_drafts", "publicacoes", userId],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("post_drafts")
         .select("id, content, summary, status, approved_at, published_at, linkedin_post_id")
+        .eq("user_id", userId!)
         .in("status", ["aprovado", "publicado"])
         .order("created_at", { ascending: false })
         .limit(50);

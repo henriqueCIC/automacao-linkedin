@@ -71,7 +71,7 @@ export interface FiltroArquivo {
   /** Expressão regular correspondente ao caminho ou extensão do arquivo */
   padrao: RegExp;
   /** Categoria técnica do arquivo descartado */
-  categoria: "lockfile" | "build" | "dependencia" | "midia" | "fonte" | "documento";
+  categoria: "lockfile" | "build" | "dependencia" | "midia" | "fonte" | "documento" | "credencial";
   /** Explicação detalhada do motivo técnico do descarte */
   justificativa: string;
 }

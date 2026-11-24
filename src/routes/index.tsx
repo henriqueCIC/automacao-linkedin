@@ -108,6 +108,7 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
       const { data, error } = await supabase
         .from("day_entries")
         .select("id, entry_date, raw_notes, source, created_at")
+        .eq("user_id", userId)
         .order("entry_date", { ascending: false })
         .limit(30);
       if (error) throw new Error(error.message);
@@ -121,6 +122,7 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
       const { data, error } = await supabase
         .from("post_drafts")
         .select("id, summary, content, status, tone, created_at, published_at")
+        .eq("user_id", userId)
         .order("created_at", { ascending: false })
         .limit(30);
       if (error) throw new Error(error.message);

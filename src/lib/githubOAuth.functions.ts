@@ -8,8 +8,8 @@ import {
   saveConnectionKeyForUser,
   getConnectionForUser,
   deleteConnectionForUser,
-  saveAccountLogin,
 } from "./appUserConnections.server";
+import { gerarStateOAuth, validarStateOAuth } from "./oauthState.server";
 
 function getGitHubCredentials() {
   const clientId = process.env["GITHUB_CLIENT_ID"];
@@ -36,9 +36,7 @@ export const startGitHubOAuth = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { clientId } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
-    const state = Buffer.from(JSON.stringify({ userId: context.userId, ts: Date.now() })).toString(
-      "base64",
-    );
+    const state = gerarStateOAuth(context.userId);
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: returnUrl,
@@ -51,8 +49,16 @@ export const startGitHubOAuth = createServerFn({ method: "POST" })
 
 export const completeGitHubOAuth = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({ code: z.string() }))
+  .validator(
+    z.object({
+      code: z.string().trim().min(1, "Código de autorização do GitHub ausente."),
+      state: z.string().trim().min(1, "Estado de segurança OAuth ausente."),
+    }),
+  )
   .handler(async ({ data, context }) => {
+    // Valida assinatura HMAC-SHA256, correspondência de userId e janela de expiração (S02)
+    validarStateOAuth(data.state, context.userId);
+
     const { clientId, clientSecret } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
 
@@ -72,8 +78,7 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
     });
 
     if (!tokenRes.ok) {
-      const errBody = await tokenRes.text();
-      console.error("Falha na troca do código de autorização do GitHub:", errBody);
+      console.error(`Falha na troca do código de autorização do GitHub [HTTP ${tokenRes.status}]`);
       throw new Error("Falha ao trocar código de autorização com o GitHub.");
     }
 

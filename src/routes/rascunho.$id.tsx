@@ -69,9 +69,11 @@ function DraftPage() {
     if (!loading && !session) void navigate({ to: "/auth" });
   }, [loading, session, navigate]);
 
+  const userId = session?.user.id;
+
   const draft = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["draft", id],
+    enabled: Boolean(userId),
+    queryKey: ["draft", userId, id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("post_drafts")
@@ -79,6 +81,7 @@ function DraftPage() {
           "id, summary, content, status, tone, feedback, published_at, day_entries(entry_date, raw_notes)",
         )
         .eq("id", id)
+        .eq("user_id", userId!)
         .single();
       if (error) throw new Error(error.message);
       return data;
@@ -86,8 +89,8 @@ function DraftPage() {
   });
 
   const linkedIn = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["linkedin-status"],
+    enabled: Boolean(userId),
+    queryKey: ["linkedin-status", userId],
     queryFn: () => runStatus({}),
   });
 
@@ -104,13 +107,14 @@ function DraftPage() {
           status,
           approved_at: status === "aprovado" ? new Date().toISOString() : null,
         })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("user_id", userId!);
       if (error) throw new Error(error.message);
       return status;
     },
     onSuccess: async (status) => {
       setDirty(false);
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
       toast.success(
         status === "aprovado"
@@ -125,13 +129,18 @@ function DraftPage() {
 
   const refine = useMutation({
     mutationFn: async () => {
-      await supabase.from("post_drafts").update({ content }).eq("id", id);
+      const { error } = await supabase
+        .from("post_drafts")
+        .update({ content })
+        .eq("id", id)
+        .eq("user_id", userId!);
+      if (error) throw new Error(error.message);
       return runRefine({ data: { draftId: id, feedback } });
     },
     onSuccess: async () => {
       setFeedback("");
       setDirty(false);
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       toast.success("Nova versão gerada com o seu complemento.");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Algo deu errado."),
@@ -140,7 +149,7 @@ function DraftPage() {
   const publish = useMutation({
     mutationFn: () => runPublish({ data: { draftId: id } }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
       toast.success("Publicado no LinkedIn.");
     },

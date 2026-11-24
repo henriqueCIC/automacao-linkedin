@@ -20,6 +20,7 @@ import {
 import { callAi } from "./ai.server";
 import { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo } from "./commit-file-filter";
 import { construirPromptColetaCommits } from "./prompts";
+import { sanitizarSegredosEmTexto } from "./secret-sanitizer";
 import type { RepositorioGitHub, CommitBrutoGitHub, OrigemGatilhoColeta } from "./types";
 
 export { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo };
@@ -250,14 +251,20 @@ function montarTextoCommit(
   const arquivosRelevantes = (detalhe.files ?? [])
     .filter((arquivo) => deveIncluirArquivo(arquivo.filename))
     .map((arquivo) => {
-      const trechoPatch = arquivo.patch ? `\n${truncarPatch(arquivo.patch)}` : "";
-      return `- ${arquivo.filename} (${arquivo.status}, +${arquivo.additions}/-${arquivo.deletions})${trechoPatch}`;
+      const patchSanitizado = arquivo.patch
+        ? `\n${truncarPatch(sanitizarSegredosEmTexto(arquivo.patch).textoSanitizado)}`
+        : "";
+      return `- ${arquivo.filename} (${arquivo.status}, +${arquivo.additions}/-${arquivo.deletions})${patchSanitizado}`;
     })
     .join("\n");
 
+  const mensagemSanitizada = sanitizarSegredosEmTexto(
+    detalhe.commit.message.trim(),
+  ).textoSanitizado;
+
   return [
     `Repositório: ${nomeRepo}`,
-    `Commit: ${detalhe.commit.message.trim()}`,
+    `Commit: ${mensagemSanitizada}`,
     `Data: ${detalhe.commit.author?.date ?? ""}`,
     `Link: ${detalhe.html_url}`,
     "Arquivos alterados:",

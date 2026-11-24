@@ -122,6 +122,27 @@ export const REGRAS_FILTRO_ANTI_RUIDO: readonly FiltroArquivo[] = [
     justificativa:
       "Vídeos, áudios, PDFs ou arquivos compactados que não suportam leitura por diff de texto.",
   },
+
+  // 7. Credenciais, arquivos de ambiente reais e chaves criptográficas (S04)
+  {
+    padrao: /(^|\/)\.env(?:\.(?!example$|sample$|template$)[^/]+)?$/i,
+    categoria: "credencial",
+    justificativa:
+      "Arquivos .env reais contêm segredos de ambiente e nunca devem ser enviados para provedores externos de IA (.env.example/.template permanecem permitidos).",
+  },
+  {
+    padrao: /\.(pem|key|p12|pfx|keystore|jks)$/i,
+    categoria: "credencial",
+    justificativa:
+      "Chaves privadas e certificados criptográficos jamais devem sair do repositório.",
+  },
+  {
+    padrao:
+      /(^|\/)(?:id_rsa|id_ed25519|id_ecdsa|id_dsa|\.npmrc|\.pypirc|credentials\.json|service-account[^/]*\.json)$/i,
+    categoria: "credencial",
+    justificativa:
+      "Chaves SSH e arquivos de credenciais de registros ou contas de serviço de nuvem.",
+  },
 ];
 
 /**

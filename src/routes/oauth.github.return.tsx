@@ -27,6 +27,7 @@ function OAuthReturnPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const code = params.get("code");
+    const state = params.get("state");
     const error = params.get("error") || params.get("error_description");
 
     if (error) {
@@ -41,9 +42,9 @@ function OAuthReturnPage() {
       return;
     }
 
-    if (!code) {
+    if (!code || !state) {
       setStatus("erro");
-      setMessage("Código de autorização do GitHub não recebido.");
+      setMessage("Parâmetros de autorização do GitHub incompletos (código ou estado ausente).");
       if (window.opener) {
         window.opener.postMessage(
           { type: "githubOAuthFailed", connectorId: "github" },
@@ -53,7 +54,7 @@ function OAuthReturnPage() {
       return;
     }
 
-    complete({ data: { code } })
+    complete({ data: { code, state } })
       .then(() => {
         setStatus("ok");
         setMessage("GitHub conectado com sucesso. Você já pode buscar seus commits.");

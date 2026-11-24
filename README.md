@@ -1,6 +1,6 @@
 # Automação LinkedIn
 
-**Versão base: 0.1.0 | Branch ativa: `melhoria/fundacao-testes` (Etapas 1 e 2 verificadas localmente — ainda não pronta para produção).**
+**Versão base: 0.1.0 | Branch ativa: `melhoria/fundacao-testes` (Etapas 1, 2 e 3.1 verificadas localmente — etapas 3.2+ e 4 pendentes).**
 
 Transforma atividades de desenvolvimento em rascunhos para revisão humana. Este repositório registra a evolução estruturada de um case de automação com IA. Não representa ainda uma versão pronta para produção até a conclusão das etapas de segurança, integridade operacional e testes E2E (Etapas 3 e 4).
 
@@ -97,17 +97,26 @@ Registro detalhado em [docs/VERIFICACAO_ETAPA2.md](docs/VERIFICACAO_ETAPA2.md).
 - **Resiliência e segurança (`IA02`):** Timeout explícito via `AbortSignal.timeout` (padrão 30s / `AI_TIMEOUT_MS`), chave do Gemini movida da URL para o cabeçalho `x-goog-api-key`, modelo padrão atualizado (`gemini-3.8-flash`) e fallback automático **Gemini → OpenAI** testado em `tests/integration/ai.server.test.ts` (sem cobrança de APIs).
 - **Prompts e tons (`IA03` e `T01`):** Novo módulo puro `src/lib/prompts.ts` separando o roadmap interno dos prompts de post, aplicando o tom configurado pelo usuário na coleta automática e alinhando `TomDeVoz` (`profissional | narrativo | tecnico`).
 
+### Subetapa 3.1 — Segurança Crítica e Isolamento (Concluída e Verificada)
+Registro detalhado em [docs/VERIFICACAO_ETAPA3_1.md](docs/VERIFICACAO_ETAPA3_1.md).
+
+- **Criptografia obrigatória (`S01`):** Removida a chave fixa de fallback em `src/lib/connectionKeyCrypto.server.ts`; `ENCRYPTION_SECRET` (base64 de exatos 32 bytes) agora é validada obrigatoriamente.
+- **OAuth com `state` autenticado (`S02`):** Novo módulo `src/lib/oauthState.server.ts` com assinatura `HMAC-SHA256`, comparação em tempo constante (`timingSafeEqual`), expiração de 10 minutos e vínculo estrito ao `userId` autenticado.
+- **Credencial LinkedIn individual (`S03`):** Removido o fallback global `LINKEDIN_ACCESS_TOKEN` em `src/lib/linkedin.functions.ts`; cada usuário utiliza exclusivamente sua própria conexão em `app_user_connections`.
+- **Prevenção de vazamento de segredos (`S04`):** Bloqueio de `.env*` reais, `.pem`, `.key`, `id_rsa`, `id_ed25519` e `credentials.json` no filtro de arquivos + mascaramento de tokens, chaves privadas e senhas em URLs via `src/lib/secret-sanitizer.ts` antes do envio à IA.
+- **Isolamento entre usuários (`U02`):** Filtros `.eq("user_id", userId)` explícitos e inclusão de `userId` nas `queryKey`s de cache em `index.tsx`, `publicacoes.tsx`, `rascunho.$id.tsx`, `drafts.functions.ts` e `linkedin.functions.ts`.
+
 ### Evidências Consolidadas na Branch
 
 | Verificação | Comando | Resultado Atual |
 | --- | --- | --- |
-| **Testes Unitários + Integração** | `npm test` | ✅ **30/30 passando** (4 arquivos em `tests/unit/` e `tests/integration/`) |
+| **Testes Unitários + Integração** | `npm test` | ✅ **39/39 passando** (5 arquivos em `tests/unit/` e `tests/integration/`) |
 | **TypeScript Estrito** | `npm run typecheck` | ✅ **0 erros** |
 | **ESLint + Prettier** | `npm run lint` | ✅ **0 erros** *(7 avisos padrão do shadcn/ui `react-refresh`)* |
 | **Build de Produção** | `npm run build` | ✅ **Compilado** (cliente + servidor) |
 | **Higiene de Diff** | `git diff --check` | ✅ **0 problemas** |
 
-Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Build e testes unitários/integrados aprovados ainda não substituem a conclusão de segurança e E2E das Etapas 3 e 4.
+Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Build e testes unitários/integrados aprovados ainda não substituem a conclusão das subetapas 3.2–3.5 e dos testes E2E da Etapa 4.
 
 ## Erros e limitações conhecidos (Acompanhamento desde a 0.1.0)
 
@@ -119,18 +128,18 @@ Os registros históricos da preparação inicial `0.1.0` permanecem preservados 
 | IA02 | Alta | Falha Gemini não aciona OpenAI; timeout explícito ausente | ✅ **Resolvido na Etapa 2** (`AbortSignal.timeout` + fallback) |
 | IA03 | Média | Prompt inclui roadmap fixo e tom da coleta não orientava geração | ✅ **Resolvido na Etapa 2** (`src/lib/prompts.ts`) |
 | T01 | Média | Tipos de domínio e contratos de tons divergiam | ✅ **Resolvido na Etapa 2** (`TomDeVoz` unificado) |
-| D03 | Alta | Gravações e conclusão de execução ignoravam alguns erros | 🟡 **Parcial na Etapa 1** (4 caminhos terminais + `since_at` corrigidos; revisar demais fluxos na Etapa 3) |
-| D01 | Alta | Commits marcados antes de salvar rascunho | ⏳ Etapa 3: confirmação pós-persistência e recuperação |
-| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | ⏳ Etapa 3: paginação e pendências por repositório |
-| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ⏳ Etapa 3: concorrência, tentativas e reconciliação |
-| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | ⏳ Etapa 3: obrigar `ENCRYPTION_SECRET` válida |
-| S02 | Alta | OAuth GitHub não valida o `state` de retorno | ⏳ Etapa 3: validar `state` com teste de regressão |
-| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | ⏳ Etapa 3: credencial individual e remoção de fallback global |
-| S04 | Alta | Filtro de ruído não é filtro de segredos | ⏳ Etapa 3: sanitização de segredos antes de enviar diffs |
-| A01 | Alta | Cron marca o dia mesmo após resultado de erro | ⏳ Etapa 3: separar tentativa de sucesso e impedir sobreposição |
-| A02 | Alta | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes | ⏳ Etapa 3: validação IANA e datas determinísticas |
+| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | ✅ **Resolvido na Subetapa 3.1** (`ENCRYPTION_SECRET` 32B obrigatória) |
+| S02 | Alta | OAuth GitHub não valida o `state` de retorno | ✅ **Resolvido na Subetapa 3.1** (`oauthState.server.ts` HMAC + TTL) |
+| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | ✅ **Resolvido na Subetapa 3.1** (`obterTokenLinkedInDoUsuario`) |
+| S04 | Alta | Filtro de ruído não é filtro de segredos | ✅ **Resolvido na Subetapa 3.1** (`secret-sanitizer.ts` + filtro `.env`/`.pem`) |
+| U02 | Média | Cache de algumas consultas não inclui usuário | ✅ **Resolvido na Subetapa 3.1** (`userId` nas `queryKey`s e queries) |
+| D03 | Alta | Gravações e conclusão de execução ignoravam alguns erros | ✅ **Resolvido nas Etapas 1 e 3.1** (caminhos terminais, conexões e publicação verificados) |
+| D01 | Alta | Commits marcados antes de salvar rascunho | ⏳ Subetapa 3.2: confirmação pós-persistência e recuperação |
+| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | ⏳ Subetapa 3.2: paginação e pendências por repositório |
+| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ⏳ Subetapa 3.2: concorrência, tentativas e reconciliação |
+| A01 | Alta | Cron marca o dia mesmo após resultado de erro | ⏳ Subetapa 3.3: separar tentativa de sucesso e impedir sobreposição |
+| A02 | Alta | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes | ⏳ Subetapa 3.3: validação IANA e datas determinísticas |
 | U01 | Média | Preferências de notificação sem entrega implementada | ⏳ Evolução posterior com testes |
-| U02 | Média | Cache de algumas consultas não inclui usuário | ⏳ Etapas 3–4: isolamento de sessão e E2E |
 
 A auditoria anterior apontou também um alerta alto em Zod. Isso deve ser revalidado antes de atualizar dependências; não foi executada atualização automática nesta preparação.
 

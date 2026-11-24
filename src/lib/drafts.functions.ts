@@ -13,6 +13,7 @@ export const generateDraft = createServerFn({ method: "POST" })
       .from("day_entries")
       .select("id, entry_date, raw_notes")
       .eq("id", data.entryId)
+      .eq("user_id", userId)
       .single();
     if (error || !entry) throw new Error("Registro do dia não encontrado.");
 
@@ -44,7 +45,7 @@ export const refineDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(z.object({ draftId: z.string(), feedback: z.string() }))
   .handler(async ({ data, context }) => {
-    const { supabase } = context;
+    const { supabase, userId } = context;
     const feedback = data.feedback.trim().slice(0, 2000);
     if (!feedback) throw new Error("Escreva o que deve mudar no post.");
 
@@ -52,6 +53,7 @@ export const refineDraft = createServerFn({ method: "POST" })
       .from("post_drafts")
       .select("id, content, summary, tone, status, day_entries(raw_notes, entry_date)")
       .eq("id", data.draftId)
+      .eq("user_id", userId)
       .single();
     if (error || !draft) throw new Error("Rascunho não encontrado.");
     if (draft.status === "publicado") throw new Error("Este post já foi publicado.");
@@ -74,7 +76,8 @@ export const refineDraft = createServerFn({ method: "POST" })
         feedback,
         approved_at: null,
       })
-      .eq("id", draft.id);
+      .eq("id", draft.id)
+      .eq("user_id", userId);
     if (updateError) throw new Error(updateError.message);
 
     return { ok: true };
