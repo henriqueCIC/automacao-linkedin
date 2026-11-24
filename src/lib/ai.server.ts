@@ -450,13 +450,25 @@ export async function callAi(
   // 2. Provedor alternativo direto quando apenas OpenAI está configurada
   const modeloOpenAi = process.env["OPENAI_MODEL"]?.trim() || MODELO_PADRAO_OPENAI;
   const inicioOpenAi = Date.now();
-  const resposta = await chamarOpenAi(openaiKey!, systemSeguro, userSeguro, timeoutMs);
-  registrarEventoOperacional({
-    evento: "chamada_ia_concluida",
-    provedorIA: "openai",
-    modeloIA: modeloOpenAi,
-    latenciaIAMs: Date.now() - inicioOpenAi,
-    status: "ok",
-  });
-  return resposta;
+  try {
+    const resposta = await chamarOpenAi(openaiKey!, systemSeguro, userSeguro, timeoutMs);
+    registrarEventoOperacional({
+      evento: "chamada_ia_concluida",
+      provedorIA: "openai",
+      modeloIA: modeloOpenAi,
+      latenciaIAMs: Date.now() - inicioOpenAi,
+      status: "ok",
+    });
+    return resposta;
+  } catch (erroOpenAi) {
+    registrarEventoOperacional({
+      evento: "chamada_ia_falhou",
+      provedorIA: "openai",
+      modeloIA: modeloOpenAi,
+      latenciaIAMs: Date.now() - inicioOpenAi,
+      status: "erro",
+      mensagem: erroOpenAi instanceof Error ? erroOpenAi.message : "Erro desconhecido na OpenAI.",
+    });
+    throw erroOpenAi;
+  }
 }

@@ -36,17 +36,17 @@ flowchart LR
 
 TypeScript, React, TanStack Start, Vite, Tailwind, Supabase/PostgreSQL, Zod, Vitest, Playwright e chamadas HTTP às APIs GitHub, LinkedIn e LLMs. As versões efetivas das dependências estão em `package-lock.json`.
 
-| Diretório | Responsabilidade |
-| --- | --- |
-| `src/routes/` | Telas e endpoint de coleta agendada |
-| `src/lib/` | Coleta, filtro, sanitização, IA, prompts, fuso IANA, cron, observabilidade, credenciais e publicação |
-| `src/integrations/supabase/` | Clientes, autenticação e tipos do banco |
-| `src/components/` | Componentes compartilhados |
-| `tests/unit/` | Testes unitários de filtro, prompts, segurança, integridade, concorrência, cron, observabilidade e compatibilidade WebSocket |
-| `tests/integration/` | Testes de integração da camada de IA com HTTP simulado |
-| `tests/e2e/` | Testes ponta a ponta (Playwright) com servidor local de serviços simulados |
-| `supabase/migrations/` | Estrutura e políticas declaradas do banco |
-| `docs/` | Planejamento, relatórios de verificação por etapa e auditorias |
+| Diretório                    | Responsabilidade                                                                                                             |
+| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `src/routes/`                | Telas e endpoint de coleta agendada                                                                                          |
+| `src/lib/`                   | Coleta, filtro, sanitização, IA, prompts, fuso IANA, cron, observabilidade, credenciais e publicação                         |
+| `src/integrations/supabase/` | Clientes, autenticação e tipos do banco                                                                                      |
+| `src/components/`            | Componentes compartilhados                                                                                                   |
+| `tests/unit/`                | Testes unitários de filtro, prompts, segurança, integridade, concorrência, cron, observabilidade e compatibilidade WebSocket |
+| `tests/integration/`         | Testes de integração da camada de IA com HTTP simulado                                                                       |
+| `tests/e2e/`                 | Testes ponta a ponta (Playwright) com servidor local de serviços simulados                                                   |
+| `supabase/migrations/`       | Estrutura e políticas declaradas do banco                                                                                    |
+| `docs/`                      | Planejamento, relatórios de verificação por etapa e auditorias                                                               |
 
 Interface e documentação próprias usam português. Identificadores técnicos, tabelas, contratos de APIs e arquivos gerados preservam os nomes existentes.
 
@@ -82,6 +82,7 @@ npm run build
 ## Progresso e Relatórios Verificados na Branch (`melhoria/fundacao-testes`)
 
 ### Etapa 1 — Fundação de Qualidade (Concluída e Verificada)
+
 Registro detalhado em [docs/VERIFICACAO_ETAPA1.md](docs/VERIFICACAO_ETAPA1.md).
 
 - **Framework de testes:** Vitest `4.1.12` (validado via Context7) em `vitest.config.ts` isolado dos plugins SSR, com scripts `test`, `test:watch` e `typecheck`.
@@ -90,6 +91,7 @@ Registro detalhado em [docs/VERIFICACAO_ETAPA1.md](docs/VERIFICACAO_ETAPA1.md).
 - **Regularização do Lint (`Q01`):** Corrigidos `prefer-const` (`src/routes/fontes.tsx`), aviso de `useEffect` (`src/routes/configuracoes.tsx`) e 492 erros de formatação Prettier sem desativar nenhuma regra do ESLint.
 
 ### Etapa 2 — Camada de IA Confiável (Concluída e Verificada)
+
 Registro detalhado em [docs/VERIFICACAO_ETAPA2.md](docs/VERIFICACAO_ETAPA2.md).
 
 - **Schemas em execução (`IA01`):** Validação Zod de entrada e saída (`summary`: 10–1.500 chars; `content`: 20–3.000 chars) em `src/lib/ai.server.ts`, rejeitando JSON inválido ou respostas vazias antes do banco/UI.
@@ -97,6 +99,7 @@ Registro detalhado em [docs/VERIFICACAO_ETAPA2.md](docs/VERIFICACAO_ETAPA2.md).
 - **Prompts e tons (`IA03` e `T01`):** Módulo puro `src/lib/prompts.ts` separando o roadmap interno dos prompts de post, aplicando o tom configurado pelo usuário na coleta automática e alinhando `TomDeVoz` (`profissional | narrativo | tecnico`).
 
 ### Etapa 3 — Automação, Segurança, Integridade, Observabilidade e CI (Concluída e Verificada)
+
 Registros detalhados em [docs/VERIFICACAO_ETAPA3_1.md](docs/VERIFICACAO_ETAPA3_1.md) e [docs/VERIFICACAO_ETAPA3_COMPLETA.md](docs/VERIFICACAO_ETAPA3_COMPLETA.md).
 
 - **Subetapa 3.1 — Segurança e Isolamento (`S01`, `S02`, `S03`, `S04`, `U02`):**
@@ -118,6 +121,7 @@ Registros detalhados em [docs/VERIFICACAO_ETAPA3_1.md](docs/VERIFICACAO_ETAPA3_1
   - Workflow `.github/workflows/ci.yml` em Node.js 22 LTS executando `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` e `npm run test:e2e` com upload de artefatos.
 
 ### Etapa 4 — Interface, Revisão Humana e Testes E2E com Playwright (Concluída e Verificada)
+
 Registro detalhado em [docs/VERIFICACAO_ETAPA4.md](docs/VERIFICACAO_ETAPA4.md).
 
 - **Suíte E2E isolada (`playwright.config.ts`, `tests/e2e/`):** Servidor local determinístico (`tests/e2e/helpers/mock-services-server.mjs`) simulando Supabase Auth/PostgREST com RLS, GitHub, Gemini e LinkedIn UGC API sem chamadas externas, sem cobrança e sem publicar em contas reais.
@@ -126,39 +130,39 @@ Registro detalhado em [docs/VERIFICACAO_ETAPA4.md](docs/VERIFICACAO_ETAPA4.md).
 
 ### Evidências Consolidadas na Branch
 
-| Verificação | Comando | Resultado Atual |
-| --- | --- | --- |
-| **Testes Unitários + Integração** | `npm test` | ✅ **56/56 passando** (8 arquivos em `tests/unit/` e `tests/integration/`) |
-| **Testes Ponta a Ponta (Playwright)** | `npm run test:e2e` | ✅ **4/4 cenários completos passando** (Chromium + servidor simulado isolado) |
-| **TypeScript Estrito** | `npm run typecheck` | ✅ **0 erros** |
-| **ESLint + Prettier** | `npm run lint` | ✅ **0 erros** *(7 avisos padrão do shadcn/ui `react-refresh`)* |
-| **Build de Produção** | `npm run build` | ✅ **Compilado** (cliente + servidor) |
-| **Higiene de Diff** | `git diff --check` | ✅ **0 problemas** |
+| Verificação                           | Comando             | Resultado Atual                                                               |
+| ------------------------------------- | ------------------- | ----------------------------------------------------------------------------- |
+| **Testes Unitários + Integração**     | `npm test`          | ✅ **56/56 passando** (8 arquivos em `tests/unit/` e `tests/integration/`)    |
+| **Testes Ponta a Ponta (Playwright)** | `npm run test:e2e`  | ✅ **4/4 cenários completos passando** (Chromium + servidor simulado isolado) |
+| **TypeScript Estrito**                | `npm run typecheck` | ✅ **0 erros**                                                                |
+| **ESLint + Prettier**                 | `npm run lint`      | ✅ **0 erros** _(7 avisos padrão do shadcn/ui `react-refresh`)_               |
+| **Build de Produção**                 | `npm run build`     | ✅ **Compilado** (cliente + servidor)                                         |
+| **Higiene de Diff**                   | `git diff --check`  | ✅ **0 problemas**                                                            |
 
-Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md).
+Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Os pareceres das duas auditorias independentes (Conformidade e Adversarial) que aprovaram as Etapas 1 a 4 no Gate Global da Fase 6 estão registrados em [docs/AUDITORIAS_ETAPAS_1_A_4.md](docs/AUDITORIAS_ETAPAS_1_A_4.md).
 
 ## Acompanhamento de Problemas e Limitações (Desde a 0.1.0)
 
-| ID | Prioridade | Problema observado na 0.1.0 | Status na branch `melhoria/fundacao-testes` |
-| --- | --- | --- | --- |
-| Q01 | Alta | Lint reprovado e ausência de testes | ✅ **Resolvido nas Etapas 1 e 4** (56 testes Vitest + 4 fluxos E2E Playwright + 0 erros de lint) |
-| F01 | Média | Filtro rejeita `src/rebuild/app.ts` por substring; entrada vazia aceita | ✅ **Resolvido nas Etapas 1–2** (`commit-file-filter.ts` + testes) |
-| IA01 | Alta | Saída da IA sem validação em execução; JSON inválido virava texto | ✅ **Resolvido na Etapa 2** (schemas Zod + `ErroCamadaIA`) |
-| IA02 | Alta | Falha Gemini não aciona OpenAI; timeout explícito ausente | ✅ **Resolvido na Etapa 2** (`AbortSignal.timeout` + fallback) |
-| IA03 | Média | Prompt inclui roadmap fixo e tom da coleta não orientava geração | ✅ **Resolvido na Etapa 2** (`src/lib/prompts.ts`) |
-| T01 | Média | Tipos de domínio e contratos de tons divergiam | ✅ **Resolvido na Etapa 2** (`TomDeVoz` unificado) |
-| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | ✅ **Resolvido na Subetapa 3.1** (`ENCRYPTION_SECRET` 32B obrigatória) |
-| S02 | Alta | OAuth GitHub não valida o `state` de retorno | ✅ **Resolvido na Subetapa 3.1** (`oauthState.server.ts` HMAC + TTL) |
-| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | ✅ **Resolvido na Subetapa 3.1** (`obterTokenLinkedInDoUsuario` em `linkedin.server.ts`) |
-| S04 | Alta | Filtro de ruído não é filtro de segredos | ✅ **Resolvido na Subetapa 3.1** (`secret-sanitizer.ts` + filtro `.env`/`.pem`) |
-| U02 | Média | Cache de algumas consultas não inclui usuário | ✅ **Resolvido na Subetapa 3.1 + Etapa 4** (`userId` nas `queryKey`s, queries e teste E2E de troca de sessão) |
-| D03 | Alta | Gravações e conclusão de execução ignoravam alguns erros | ✅ **Resolvido nas Etapas 1 e 3.1** (caminhos terminais, conexões e publicação verificados) |
-| D01 | Alta | Commits marcados antes de salvar rascunho | ✅ **Resolvido na Subetapa 3.2** (confirmação tardia em lote de `seen_commits` pós-persistência) |
-| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | ✅ **Resolvido na Subetapa 3.2** (paginação, ordenação cronológica e preservação de `until_at` com excedentes) |
-| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ✅ **Resolvido na Subetapa 3.2** (reserva atômica `aprovado` → `publicando` e reconciliação idempotente) |
-| A01 | Alta | Cron marca o dia mesmo após resultado de erro | ✅ **Resolvido na Subetapa 3.3** (`cron.server.ts` avança `last_run_date` apenas quando `status === "ok"`) |
-| A02 | Alta | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes | ✅ **Resolvido na Subetapa 3.3** (`timezone.ts` com validação IANA via `Intl.DateTimeFormat`) |
-| U01 | Média | Preferências de notificação sem entrega implementada | ⏳ Evolução posterior de produto (fora do escopo das Etapas 1–4 conforme `roadmap.md`) |
+| ID   | Prioridade            | Problema observado na 0.1.0                                                | Status na branch `melhoria/fundacao-testes`                                                                    |
+| ---- | --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Q01  | Alta                  | Lint reprovado e ausência de testes                                        | ✅ **Resolvido nas Etapas 1 e 4** (56 testes Vitest + 4 fluxos E2E Playwright + 0 erros de lint)               |
+| F01  | Média                 | Filtro rejeita `src/rebuild/app.ts` por substring; entrada vazia aceita    | ✅ **Resolvido nas Etapas 1–2** (`commit-file-filter.ts` + testes)                                             |
+| IA01 | Alta                  | Saída da IA sem validação em execução; JSON inválido virava texto          | ✅ **Resolvido na Etapa 2** (schemas Zod + `ErroCamadaIA`)                                                     |
+| IA02 | Alta                  | Falha Gemini não aciona OpenAI; timeout explícito ausente                  | ✅ **Resolvido na Etapa 2** (`AbortSignal.timeout` + fallback)                                                 |
+| IA03 | Média                 | Prompt inclui roadmap fixo e tom da coleta não orientava geração           | ✅ **Resolvido na Etapa 2** (`src/lib/prompts.ts`)                                                             |
+| T01  | Média                 | Tipos de domínio e contratos de tons divergiam                             | ✅ **Resolvido na Etapa 2** (`TomDeVoz` unificado)                                                             |
+| S01  | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto                | ✅ **Resolvido na Subetapa 3.1** (`ENCRYPTION_SECRET` 32B obrigatória)                                         |
+| S02  | Alta                  | OAuth GitHub não valida o `state` de retorno                               | ✅ **Resolvido na Subetapa 3.1** (`oauthState.server.ts` HMAC + TTL)                                           |
+| S03  | Alta                  | Token LinkedIn global pode ser usado por outro usuário                     | ✅ **Resolvido na Subetapa 3.1** (`obterTokenLinkedInDoUsuario` em `linkedin.server.ts`)                       |
+| S04  | Alta                  | Filtro de ruído não é filtro de segredos                                   | ✅ **Resolvido na Subetapa 3.1** (`secret-sanitizer.ts` + filtro `.env`/`.pem`)                                |
+| U02  | Média                 | Cache de algumas consultas não inclui usuário                              | ✅ **Resolvido na Subetapa 3.1 + Etapa 4** (`userId` nas `queryKey`s, queries e teste E2E de troca de sessão)  |
+| D03  | Alta                  | Gravações e conclusão de execução ignoravam alguns erros                   | ✅ **Resolvido nas Etapas 1 e 3.1** (caminhos terminais, conexões e publicação verificados)                    |
+| D01  | Alta                  | Commits marcados antes de salvar rascunho                                  | ✅ **Resolvido na Subetapa 3.2** (confirmação tardia em lote de `seen_commits` pós-persistência)               |
+| D02  | Alta                  | Paginação limitada e marco temporal global podem deixar commits para trás  | ✅ **Resolvido na Subetapa 3.2** (paginação, ordenação cronológica e preservação de `until_at` com excedentes) |
+| P01  | Alta                  | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ✅ **Resolvido na Subetapa 3.2** (reserva atômica `aprovado` → `publicando` e reconciliação idempotente)       |
+| A01  | Alta                  | Cron marca o dia mesmo após resultado de erro                              | ✅ **Resolvido na Subetapa 3.3** (`cron.server.ts` avança `last_run_date` apenas quando `status === "ok"`)     |
+| A02  | Alta                  | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes   | ✅ **Resolvido na Subetapa 3.3** (`timezone.ts` com validação IANA via `Intl.DateTimeFormat`)                  |
+| U01  | Média                 | Preferências de notificação sem entrega implementada                       | ⏳ Evolução posterior de produto (fora do escopo das Etapas 1–4 conforme `roadmap.md`)                         |
 
 ## Roteiro e versionamento
 
