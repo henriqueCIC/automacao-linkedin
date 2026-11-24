@@ -1,6 +1,12 @@
 /**
- * GitHub commit collection and draft generation core.
- * Server-only — called by authenticated server functions and the cron route.
+ * @file collect.server.ts
+ * @description Módulo de Ingestão de Commits e Geração de Rascunhos do GitHub.
+ * Este arquivo executa exclusivamente no lado do servidor (Server-Only) e é responsável por:
+ * 1. Obter credenciais seguras do GitHub do usuário (descriptografadas em memória).
+ * 2. Buscar repositórios ativos e varrer commits novos dentro da janela de tempo.
+ * 3. Aplicar filtro anti-ruído para descartar lockfiles, dependências e assets pesados.
+ * 4. Desduplicar commits usando a tabela 'seen_commits' do PostgreSQL.
+ * 5. Sintetizar os diffs através do motor de IA e salvar o rascunho em 'post_drafts'.
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -12,117 +18,320 @@ import {
   saveAccountLogin,
 } from "./appUserConnections.server";
 import { callAi } from "./ai.server";
+import type {
+  RepositorioGitHub,
+  CommitBrutoGitHub,
+  CommitSanitizado,
+  FiltroArquivo,
+  OrigemGatilhoColeta,
+} from "./types";
 
+/** Tipo utilitário do cliente Supabase tipado */
 type SupabaseAuth = SupabaseClient<Database>;
 
-const IGNORED_PATHS = [
-  /package-lock\.json$/,
-  /yarn\.lock$/,
-  /pnpm-lock\.yaml$/,
-  /bun\.lockb$/,
-  /composer\.lock$/,
-  /Gemfile\.lock$/,
-  /\.lock$/,
-  /dist\//,
-  /build\//,
-  /\.next\//,
-  /node_modules\//,
-  /\.git\//,
-  /coverage\//,
-  /\.png$/,
-  /\.jpg$/,
-  /\.jpeg$/,
-  /\.gif$/,
-  /\.svg$/,
-  /\.ico$/,
-  /\.woff2?$/,
-  /\.ttf$/,
-  /\.otf$/,
-  /\.eot$/,
-  /\.mp4$/,
-  /\.mp3$/,
-  /\.pdf$/,
-  /\.zip$/,
-  /\.tar\.gz$/,
+/**
+ * Catálogo documentado de regras de filtro anti-ruído.
+ * Cada regra define a expressão regular, a categoria do artefato e a justificativa
+ * técnica pela qual o arquivo é descartado antes do envio ao modelo de IA.
+ */
+export const REGRAS_FILTRO_ANTI_RUIDO: readonly FiltroArquivo[] = [
+  // 1. Lockfiles (árvores de dependências geradas por ferramentas)
+  {
+    padrao: /package-lock\.json$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile do NPM: gerado automaticamente pela ferramenta de pacotes; polui a leitura com milhares de hashes sem representar lógica autoral.",
+  },
+  {
+    padrao: /yarn\.lock$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile do Yarn: resolução estrita de pacotes gerenciada pela máquina.",
+  },
+  {
+    padrao: /pnpm-lock\.yaml$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile do PNPM: metadados de links simbólicos e versões de dependências.",
+  },
+  {
+    padrao: /bun\.lockb?$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile binário ou textual do Bun: gerenciado internamente pelo runtime.",
+  },
+  {
+    padrao: /composer\.lock$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile do Composer (PHP): mapeamento de bibliotecas de terceiros.",
+  },
+  {
+    padrao: /Gemfile\.lock$/,
+    categoria: "lockfile",
+    justificativa: "Lockfile do Ruby/Bundler: controle estrito de versões externas.",
+  },
+  {
+    padrao: /\.lock$/,
+    categoria: "lockfile",
+    justificativa: "Lockfiles genéricos (Poetry, Cargo, etc.): descartados para priorizar código-fonte.",
+  },
+
+  // 2. Diretórios de compilação, bundling e testes
+  {
+    padrao: /dist\//,
+    categoria: "build",
+    justificativa: "Diretório de distribuição: código transpilado, minificado e semântica ilegível.",
+  },
+  {
+    padrao: /build\//,
+    categoria: "build",
+    justificativa: "Diretório de build de aplicações web ou mobile compiladas.",
+  },
+  {
+    padrao: /\.next\//,
+    categoria: "build",
+    justificativa: "Cache e compilação interna do Next.js gerada durante o desenvolvimento.",
+  },
+  {
+    padrao: /\.output\//,
+    categoria: "build",
+    justificativa: "Diretório de saída de servidores modernos (Nitro, Vinxi, Nuxt).",
+  },
+  {
+    padrao: /coverage\//,
+    categoria: "build",
+    justificativa: "Relatórios HTML e JSON de cobertura de testes automatizados (Jest, Vitest).",
+  },
+
+  // 3. Dependências de terceiros e controle do Git
+  {
+    padrao: /node_modules\//,
+    categoria: "dependencia",
+    justificativa: "Bibliotecas externas da pasta node_modules; nunca devem ser analisadas como código do usuário.",
+  },
+  {
+    padrao: /\.git\//,
+    categoria: "dependencia",
+    justificativa: "Objetos internos e referências do motor do Git.",
+  },
+
+  // 4. Imagens e formatos visuais (diff binário inútil para LLM)
+  {
+    padrao: /\.(png|jpg|jpeg|gif|ico|webp)$/i,
+    categoria: "midia",
+    justificativa: "Arquivos de imagem binários; não possuem representação textual legível no git diff.",
+  },
+  {
+    padrao: /\.svg$/i,
+    categoria: "midia",
+    justificativa: "Vetores SVG: embora sejam XML, geralmente contêm coordenadas de caminhos longos que gastam milhares de tokens sem agregar contexto de engenharia.",
+  },
+
+  // 5. Fontes tipográficas
+  {
+    padrao: /\.(woff2?|ttf|otf|eot)$/i,
+    categoria: "fonte",
+    justificativa: "Arquivos binários de fontes tipográficas.",
+  },
+
+  // 6. Mídias pesadas e documentos compactados
+  {
+    padrao: /\.(mp4|mp3|pdf|zip|tar\.gz)$/i,
+    categoria: "documento",
+    justificativa: "Vídeos, áudios, PDFs ou arquivos compactados que não suportam leitura por diff de texto.",
+  },
 ];
 
-function shouldIncludeFile(filename: string): boolean {
-  return !IGNORED_PATHS.some((pattern) => pattern.test(filename));
+/**
+ * Avalia se um arquivo alterado no commit deve ser considerado na análise de engenharia.
+ * Percorre a lista de regras anti-ruído documentadas e descarta o arquivo caso corresponda a algum padrão.
+ *
+ * @param nomeArquivo - Caminho relativo do arquivo no repositório.
+ * @returns {boolean} Retorna verdadeiro se o arquivo for código relevante, falso se for ruído descartável.
+ */
+function deveIncluirArquivo(nomeArquivo: string): boolean {
+  return !REGRAS_FILTRO_ANTI_RUIDO.some((regra) => regra.padrao.test(nomeArquivo));
 }
 
-async function githubFetch(userId: string, path: string, init?: RequestInit) {
-  const connection = await getConnectionForUser(userId, GITHUB_CONNECTOR_ID);
-  if (!connection) {
-    const err = new Error("GitHub não conectado. Vá em Fontes para autorizar.");
-    (err as Error & { code: string }).code = "GITHUB_NOT_CONNECTED";
-    throw err;
+/**
+ * Executa chamadas autenticadas à API oficial do GitHub (api.github.com).
+ * Utiliza o token de acesso do usuário descriptografado do cofre de credenciais.
+ *
+ * @param idUsuario - UUID do usuário proprietário da conexão.
+ * @param caminhoOuUrl - Endpoint da API (ex: '/user/repos') ou URL completa.
+ * @param init - Opções de requisição HTTP complementares.
+ * @returns Resposta HTTP da API do GitHub.
+ * @throws Erro se o GitHub não estiver conectado ou se o token estiver expirado (401).
+ */
+async function chamarApiGitHub(
+  idUsuario: string,
+  caminhoOuUrl: string,
+  init?: RequestInit,
+): Promise<Response> {
+  const conexao = await getConnectionForUser(idUsuario, GITHUB_CONNECTOR_ID);
+  if (!conexao) {
+    const erro = new Error("GitHub não conectado. Vá em Fontes para autorizar.");
+    (erro as Error & { code: string }).code = "GITHUB_NOT_CONNECTED";
+    throw erro;
   }
 
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${connection.connectionAPIKey}`);
-  headers.set("Accept", "application/vnd.github.v3+json");
-  headers.set("User-Agent", "Automacao-LinkedIn-App");
+  const cabecalhos = new Headers(init?.headers);
+  cabecalhos.set("Authorization", `Bearer ${conexao.connectionAPIKey}`);
+  cabecalhos.set("Accept", "application/vnd.github.v3+json");
+  cabecalhos.set("User-Agent", "Automacao-LinkedIn-App");
 
-  const url = path.startsWith("http") ? path : `https://api.github.com${path}`;
-  const res = await fetch(url, {
+  const urlFinal = caminhoOuUrl.startsWith("http")
+    ? caminhoOuUrl
+    : `https://api.github.com${caminhoOuUrl}`;
+
+  const resposta = await fetch(urlFinal, {
     ...init,
-    headers,
+    headers: cabecalhos,
   });
 
-  if (res.status === 401) {
-    await markReconnectRequired(userId, GITHUB_CONNECTOR_ID);
-    const err = new Error("A autorização do GitHub expirou ou é inválida. Reconecte em Fontes.");
-    (err as Error & { code: string }).code = "GITHUB_RECONNECT";
-    throw err;
+  // Tratamento de token revogado ou expirado no GitHub
+  if (resposta.status === 401) {
+    await markReconnectRequired(idUsuario, GITHUB_CONNECTOR_ID);
+    const erro = new Error("A autorização do GitHub expirou ou é inválida. Reconecte em Fontes.");
+    (erro as Error & { code: string }).code = "GITHUB_RECONNECT";
+    throw erro;
   }
 
-  return res;
+  return resposta;
 }
 
-async function fetchAccountLogin(userId: string): Promise<string> {
-  const res = await githubFetch(userId, "/user");
-  if (!res.ok) throw new Error("Não foi possível verificar sua conta no GitHub. O serviço está indisponível no momento; tente novamente em instantes.");
-  const user = (await res.json()) as { login?: string };
-  if (!user.login) throw new Error("Não foi possível identificar o usuário do GitHub.");
-  return user.login;
+/**
+ * Obtém o login (username) oficial da conta autenticada do GitHub.
+ * @param idUsuario - UUID do usuário.
+ * @returns Username no GitHub (ex: 'henriqueCIC').
+ */
+async function buscarLoginUsuario(idUsuario: string): Promise<string> {
+  const resposta = await chamarApiGitHub(idUsuario, "/user");
+  if (!resposta.ok) {
+    throw new Error(
+      "Não foi possível verificar sua conta no GitHub. O serviço está indisponível no momento; tente novamente em instantes.",
+    );
+  }
+  const dados = (await resposta.json()) as { login?: string };
+  if (!dados.login) {
+    throw new Error("Não foi possível identificar o usuário do GitHub.");
+  }
+  return dados.login;
 }
 
-async function fetchRepos(userId: string) {
-  const res = await githubFetch(userId, "/user/repos?sort=pushed&per_page=100");
-  if (!res.ok) throw new Error("Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.");
-  const repos = (await res.json()) as Array<{
+/**
+ * Consulta os repositórios aos quais o usuário tem acesso, ordenados pelos mais recentes.
+ * @param idUsuario - UUID do usuário.
+ * @returns Lista de repositórios com nome e data do último push.
+ */
+async function buscarRepositoriosUsuario(idUsuario: string): Promise<RepositorioGitHub[]> {
+  const resposta = await chamarApiGitHub(idUsuario, "/user/repos?sort=pushed&per_page=100");
+  if (!resposta.ok) {
+    throw new Error("Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.");
+  }
+  const listaBruta = (await resposta.json()) as Array<{
     full_name: string;
+    name: string;
+    owner?: { login?: string };
     pushed_at?: string | null;
+    private?: boolean;
   }>;
-  return repos;
+
+  return listaBruta.map((repo) => {
+    const [donoPadrao, nomePadrao] = repo.full_name.split("/");
+    return {
+      nomeCompleto: repo.full_name,
+      dono: repo.owner?.login ?? donoPadrao ?? "",
+      nome: repo.name ?? nomePadrao ?? "",
+      ultimoPushEm: repo.pushed_at ?? null,
+      privado: repo.private ?? false,
+    };
+  });
 }
 
-async function fetchCommits(
-  userId: string,
-  owner: string,
-  repo: string,
+/**
+ * Busca commits realizados especificamente pelo usuário em um repositório dentro de uma janela temporal.
+ *
+ * @param idUsuario - UUID do usuário.
+ * @param dono - Proprietário do repositório.
+ * @param nomeRepo - Nome do repositório.
+ * @param login - Login do GitHub para filtrar commits por autor.
+ * @param dataInicialIso - Data ISO a partir da qual os commits serão considerados.
+ * @returns Lista de commits brutos encontrados.
+ */
+async function buscarCommitsDoAutor(
+  idUsuario: string,
+  dono: string,
+  nomeRepo: string,
   login: string,
-  since?: string,
-) {
-  const params = new URLSearchParams({ author: login, per_page: "100" });
-  if (since) params.set("since", since);
-  const res = await githubFetch(
-    userId,
-    `/repos/${owner}/${repo}/commits?${params.toString()}`,
+  dataInicialIso?: string,
+): Promise<CommitBrutoGitHub[]> {
+  const parametros = new URLSearchParams({ author: login, per_page: "100" });
+  if (dataInicialIso) {
+    parametros.set("since", dataInicialIso);
+  }
+
+  const resposta = await chamarApiGitHub(
+    idUsuario,
+    `/repos/${dono}/${nomeRepo}/commits?${parametros.toString()}`,
   );
-  if (res.status === 404 || res.status === 409) return [];
-  if (!res.ok) throw new Error(`Não foi possível buscar os commits de ${owner}/${repo}. Verifique a autorização em Fontes ou tente novamente.`);
-  return (await res.json()) as Array<{
+
+  // Repositório vazio ou sem histórico
+  if (resposta.status === 404 || resposta.status === 409) {
+    return [];
+  }
+  if (!resposta.ok) {
+    throw new Error(
+      `Não foi possível buscar os commits de ${dono}/${nomeRepo}. Verifique a autorização em Fontes ou tente novamente.`,
+    );
+  }
+
+  const payload = (await resposta.json()) as Array<{
     sha: string;
-    commit: { message: string; author?: { date?: string } };
     html_url: string;
+    commit: {
+      message: string;
+      author?: {
+        name?: string;
+        email?: string;
+        date?: string;
+      };
+    };
   }>;
+
+  return payload.map((item) => ({
+    sha: item.sha,
+    urlHtml: item.html_url,
+    dados: {
+      mensagem: item.commit.message,
+      ...(item.commit.author
+        ? {
+            autor: {
+              nome: item.commit.author.name,
+              email: item.commit.author.email,
+              data: item.commit.author.date,
+            },
+          }
+        : {}),
+    },
+  }));
 }
 
-async function fetchCommitDetail(userId: string, owner: string, repo: string, sha: string) {
-  const res = await githubFetch(userId, `/repos/${owner}/${repo}/commits/${sha}`);
-  if (!res.ok) throw new Error("Não foi possível ler o git diff no GitHub. Tente novamente em instantes.");
-  return (await res.json()) as {
+/**
+ * Consulta os detalhes completos de um commit individual, incluindo lista de arquivos e diff (patch).
+ *
+ * @param idUsuario - UUID do usuário.
+ * @param dono - Dono do repositório.
+ * @param nomeRepo - Nome do repositório.
+ * @param sha - Hash identificador do commit.
+ */
+async function buscarDetalhesCommit(
+  idUsuario: string,
+  dono: string,
+  nomeRepo: string,
+  sha: string,
+) {
+  const resposta = await chamarApiGitHub(idUsuario, `/repos/${dono}/${nomeRepo}/commits/${sha}`);
+  if (!resposta.ok) {
+    throw new Error("Não foi possível ler o git diff no GitHub. Tente novamente em instantes.");
+  }
+  return (await resposta.json()) as {
     sha: string;
     commit: { message: string; author?: { date?: string } };
     html_url: string;
@@ -137,73 +346,102 @@ async function fetchCommitDetail(userId: string, owner: string, repo: string, sh
   };
 }
 
-function truncatePatch(patch: string, maxLines = 80): string {
-  const lines = patch.split("\n");
-  if (lines.length <= maxLines) return patch;
-  return lines.slice(0, maxLines).join("\n") + "\n... (diff truncado)";
+/**
+ * Trunca patches excessivamente longos para manter o consumo de tokens sob controle.
+ * @param patch - Texto do git diff.
+ * @param limiteLinhas - Máximo de linhas permitidas por arquivo (padrão: 80 linhas).
+ */
+function truncarPatch(patch: string, limiteLinhas = 80): string {
+  const linhas = patch.split("\n");
+  if (linhas.length <= limiteLinhas) return patch;
+  return linhas.slice(0, limiteLinhas).join("\n") + "\n... (diff truncado para economia de tokens)";
 }
 
-function buildCommitText(detail: Awaited<ReturnType<typeof fetchCommitDetail>>, repo: string): string {
-  const files = (detail.files ?? [])
-    .filter((f) => shouldIncludeFile(f.filename))
-    .map((f) => {
-      const patch = f.patch ? `\n${truncatePatch(f.patch)}` : "";
-      return `- ${f.filename} (${f.status}, +${f.additions}/-${f.deletions})${patch}`;
+/**
+ * Monta o bloco textual com metadados e diffs relevantes de um commit para alimentar a IA.
+ *
+ * @param detalhe - Detalhes retornados pela API do GitHub para o commit.
+ * @param nomeRepo - Nome do repositório.
+ */
+function montarTextoCommit(
+  detalhe: Awaited<ReturnType<typeof buscarDetalhesCommit>>,
+  nomeRepo: string,
+): string {
+  const arquivosRelevantes = (detalhe.files ?? [])
+    .filter((arquivo) => deveIncluirArquivo(arquivo.filename))
+    .map((arquivo) => {
+      const trechoPatch = arquivo.patch ? `\n${truncarPatch(arquivo.patch)}` : "";
+      return `- ${arquivo.filename} (${arquivo.status}, +${arquivo.additions}/-${arquivo.deletions})${trechoPatch}`;
     })
     .join("\n");
 
   return [
-    `Repositório: ${repo}`,
-    `Commit: ${detail.commit.message.trim()}`,
-    `Data: ${detail.commit.author?.date ?? ""}`,
-    `Link: ${detail.html_url}`,
+    `Repositório: ${nomeRepo}`,
+    `Commit: ${detalhe.commit.message.trim()}`,
+    `Data: ${detalhe.commit.author?.date ?? ""}`,
+    `Link: ${detalhe.html_url}`,
     "Arquivos alterados:",
-    files || "(nenhum arquivo legível incluído)",
+    arquivosRelevantes || "(nenhum arquivo de código elegível incluído)",
   ].join("\n");
 }
 
-async function loadSeenShas(
+/**
+ * Carrega a lista de commits já processados anteriormente para o repositório.
+ * Garante que a ingestão seja idempotente e nunca processe o mesmo commit duas vezes.
+ */
+async function carregarHashesProcessados(
   supabase: SupabaseAuth,
-  userId: string,
-  repoFullName: string,
+  idUsuario: string,
+  nomeCompletoRepo: string,
 ): Promise<Set<string>> {
   const { data, error } = await supabase
     .from("seen_commits")
     .select("commit_sha")
-    .eq("user_id", userId)
-    .eq("repo_full_name", repoFullName);
+    .eq("user_id", idUsuario)
+    .eq("repo_full_name", nomeCompletoRepo);
+
   if (error) throw error;
-  return new Set((data ?? []).map((r) => r.commit_sha));
+  return new Set((data ?? []).map((registro) => registro.commit_sha));
 }
 
-async function recordSeenCommit(
+/**
+ * Registra um commit no banco de dados como processado.
+ */
+async function registrarCommitProcessado(
   supabase: SupabaseAuth,
-  userId: string,
-  repoFullName: string,
+  idUsuario: string,
+  nomeCompletoRepo: string,
   sha: string,
-  committedAt?: string,
-) {
+  dataCommit?: string,
+): Promise<void> {
   const { error } = await supabase.from("seen_commits").upsert(
     {
-      user_id: userId,
-      repo_full_name: repoFullName,
+      user_id: idUsuario,
+      repo_full_name: nomeCompletoRepo,
       commit_sha: sha,
-      committed_at: committedAt ? new Date(committedAt).toISOString() : null,
+      committed_at: dataCommit ? new Date(dataCommit).toISOString() : null,
     },
     { onConflict: "user_id,repo_full_name,commit_sha" },
   );
-  if (error) console.error("Failed to record seen commit:", error);
+
+  if (error) {
+    console.error("Falha ao registrar commit processado:", error);
+  }
 }
 
-async function getOrCreateAutomationSettings(supabase: SupabaseAuth, userId: string) {
+/**
+ * Carrega as preferências de automação do usuário ou cria o registro padrão caso ainda não exista.
+ */
+async function obterOuCriarConfiguracoesAutomacao(supabase: SupabaseAuth, idUsuario: string) {
   const { data, error } = await supabase
     .from("automation_settings")
     .select("*")
-    .eq("user_id", userId)
+    .eq("user_id", idUsuario)
     .single();
+
   if (error?.code === "PGRST116" || !data) {
-    const insert = {
-      user_id: userId,
+    const configuracaoPadrao = {
+      user_id: idUsuario,
       enabled: true,
       daily_time: "18:00",
       timezone: "America/Bahia",
@@ -212,56 +450,83 @@ async function getOrCreateAutomationSettings(supabase: SupabaseAuth, userId: str
       notify_desktop: true,
       notify_email: false,
     };
-    const { data: created, error: insertError } = await supabase
+
+    const { data: criado, error: erroInsercao } = await supabase
       .from("automation_settings")
-      .insert(insert)
+      .insert(configuracaoPadrao)
       .select()
       .single();
-    if (insertError) throw insertError;
-    return created;
+
+    if (erroInsercao) throw erroInsercao;
+    return criado;
   }
+
   if (error) throw error;
   return data;
 }
 
-async function lastSuccessfulRun(supabase: SupabaseAuth, userId: string) {
+/**
+ * Consulta o timestamp de término da última rodada de coleta executada com sucesso.
+ */
+async function buscarDataUltimaColetaComSucesso(
+  supabase: SupabaseAuth,
+  idUsuario: string,
+): Promise<string | null> {
   const { data, error } = await supabase
     .from("collection_runs")
     .select("until_at")
-    .eq("user_id", userId)
+    .eq("user_id", idUsuario)
     .eq("status", "ok")
     .order("until_at", { ascending: false })
     .limit(1)
     .single();
+
   if (error || !data) return null;
   return data.until_at;
 }
 
-function defaultSince(timezone = "America/Bahia") {
-  // On the very first run, look back 24 hours in the user's timezone.
-  const now = new Date();
-  const offset =
-    timezone === "America/Bahia" ? -3 * 60 : now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60 * 1000);
-  local.setHours(local.getHours() - 24);
-  return local.toISOString();
+/**
+ * Calcula a data inicial padrão de busca caso seja a primeira execução do usuário (últimas 24 horas).
+ */
+function calcularDataInicialPadrao(fusoHorario = "America/Bahia"): string {
+  const agora = new Date();
+  const deslocamento =
+    fusoHorario === "America/Bahia" ? -3 * 60 : agora.getTimezoneOffset();
+  const horaLocal = new Date(agora.getTime() - deslocamento * 60 * 1000);
+  horaLocal.setHours(horaLocal.getHours() - 24);
+  return horaLocal.toISOString();
 }
 
-const COLLECT_SYSTEM = [
-  "Você é um assistente que resume a atividade de desenvolvimento de uma pessoa, em português do Brasil.",
-  "Você receberá uma lista de commits com seus diffs.",
-  "Escreva um resumo do dia como se a pessoa estivesse registrando o que fez.",
-  "Destaque: o que foi implementado, o que foi corrigido e o que ela provavelmente aprendeu com as mudanças.",
-  "Não invente fatos que não estejam nos commits. Não exponha segredos, senhas, tokens ou trechos sensíveis de código.",
-  "Se os diffs não sustentarem uma conclusão de aprendizado, não force.",
-  "Use tópicos claros. O texto deve servir como anotações do dia para um post futuro.",
+/**
+ * Prompt de sistema orientando a IA a resumir com precisão técnica a atividade do desenvolvedor.
+ */
+const PROMPT_SISTEMA_COLETA = [
+  "Você é um assistente sênior de engenharia que resume a atividade de desenvolvimento de uma pessoa, em português do Brasil.",
+  "Você receberá uma lista de commits com seus respectivos diffs de código.",
+  "Escreva um resumo do dia como se o próprio desenvolvedor estivesse registrando o que realizou.",
+  "Destaque objetivamente: o que foi implementado, quais bugs foram corrigidos e qual aprendizado prático foi obtido.",
+  "Regra inviolável: Não invente fatos que não estejam nos commits. NUNCA exponha senhas, segredos, tokens ou dados sensíveis.",
+  "Se os diffs não evidenciarem um aprendizado profundo, seja honesto e direto, sem forçar conclusões.",
+  "Contexto do roadmap: o produto coleta commits do GitHub, sintetiza o DevLog com Gemini ou OpenAI, permite curadoria e publicação no LinkedIn. A evolução prevista inclui configuração de OAuth e variáveis de ambiente, validação local de ponta a ponta, notificações por e-mail, agendamento diário via GitHub Actions, otimização da coleta, carrosséis em PDF, variações de post e aprendizado do estilo de escrita.",
+  "No resumo, inclua as seções 'Progresso no plano', 'Próximos 5 passos' e 'Tecnologias e preparações'. Em 'Progresso no plano', relacione apenas os commits às etapas do roadmap. Em 'Próximos 5 passos', apresente nesta ordem: configurar OAuth do Google/GitHub no Supabase; configurar as variáveis de ambiente; validar o fluxo local de ponta a ponta; enviar o resumo diário por e-mail; agendar a coleta diária via GitHub Actions. Em 'Tecnologias e preparações', cite apenas as tecnologias necessárias para esses passos — Supabase, Google Cloud, GitHub OAuth, Gemini/OpenAI, Resend ou SendGrid e GitHub Actions — e a preparação concreta indicada pelo roadmap.",
+  "O roadmap é contexto de direção, não prova de execução: não marque uma etapa como concluída sem evidência nos commits e deixe claro quando um próximo passo ainda não foi iniciado.",
+  "Utilize tópicos claros e objetivos. Este texto servirá como diário de bordo (DevLog) para a publicação do LinkedIn.",
 ].join("\n");
 
+/**
+ * Função principal do fluxo de ingestão:
+ * Executa a coleta completa de commits do GitHub, filtra ruídos, sintetiza via IA e gera o rascunho de post.
+ *
+ * @param supabaseAdmin - Cliente do Supabase com privilégios de execução.
+ * @param idUsuario - UUID do usuário proprietário dos dados.
+ * @param gatilho - Origem do disparo ('manual' ou 'cron').
+ * @param idExecucaoSolicitado - ID opcional para rastreamento prévio do ciclo.
+ */
 export async function collectForUser(
   supabaseAdmin: SupabaseAuth,
-  userId: string,
-  trigger: "manual" | "cron",
-  requestedRunId?: string,
+  idUsuario: string,
+  gatilho: OrigemGatilhoColeta,
+  idExecucaoSolicitado?: string,
 ): Promise<{
   runId: string;
   status: string;
@@ -271,241 +536,363 @@ export async function collectForUser(
   postDraftId?: string;
   message?: string;
 }> {
-  const runStart = new Date().toISOString();
+  const inicioExecucao = new Date().toISOString();
+  const runId = idExecucaoSolicitado ?? crypto.randomUUID();
 
-  const runId = requestedRunId ?? crypto.randomUUID();
-  const { error: startError } = await supabaseAdmin.from("collection_runs").insert({
-    id: runId, user_id: userId, trigger, until_at: runStart,
-    status: "autenticando", message: "Verificando o login e a autorização da conta GitHub…",
+  // 1. Registra o início do ciclo de coleta no banco
+  const { error: erroInicio } = await supabaseAdmin.from("collection_runs").insert({
+    id: runId,
+    user_id: idUsuario,
+    trigger: gatilho,
+    until_at: inicioExecucao,
+    status: "autenticando",
+    message: "Verificando o login e a autorização da conta GitHub…",
   });
-  if (startError) throw new Error("Não foi possível iniciar o acompanhamento da coleta.");
-
-  async function progress(status: string, message: string, commits = 0, repositories: string[] = []) {
-    const { error } = await supabaseAdmin.from("collection_runs")
-      .update({ status, message, commits_found: commits, repositories })
-      .eq("id", runId).eq("user_id", userId);
-    if (error) throw new Error("Não foi possível atualizar o acompanhamento da coleta.");
+  if (erroInicio) {
+    throw new Error("Não foi possível iniciar o acompanhamento da coleta.");
   }
 
-  try {
-  const settings = await getOrCreateAutomationSettings(supabaseAdmin, userId);
-  if (!settings.enabled && trigger === "cron") {
-    await progress("skipped", "Automação desativada nas configurações.");
-    return {
-      runId,
-      status: "skipped",
-      commitsFound: 0,
-      repositories: [],
-      message: "Automação desativada nas configurações.",
-    };
-  }
-
-  const since = (await lastSuccessfulRun(supabaseAdmin, userId)) ?? defaultSince(settings.timezone);
-
-  await supabaseAdmin.from("collection_runs").update({ since_at: since }).eq("id", runId).eq("user_id", userId);
-  let login: string;
-  try {
-    login = await fetchAccountLogin(userId);
-    await saveAccountLogin(userId, GITHUB_CONNECTOR_ID, login);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Falha ao buscar usuário do GitHub.";
-    const { error: finishError } = await supabaseAdmin
+  /** Atualiza o progresso em tempo real na tabela 'collection_runs' */
+  async function atualizarProgresso(
+    status: string,
+    message: string,
+    commits = 0,
+    repositorios: string[] = [],
+  ) {
+    const { error } = await supabaseAdmin
       .from("collection_runs")
       .update({
-        user_id: userId,
-        trigger,
-        since_at: since,
-        until_at: runStart,
-        commits_found: 0,
-        repositories: [],
-        status: "erro",
+        status,
         message,
+        commits_found: commits,
+        repositories: repositorios,
       })
-      .eq("id", runId).eq("user_id", userId);
-    if (finishError) throw new Error("Não foi possível salvar o resultado da coleta.");
-    return {
-      runId,
-      status: "erro",
-      commitsFound: 0,
-      repositories: [],
-      message,
-    };
+      .eq("id", runId)
+      .eq("user_id", idUsuario);
+
+    if (error) {
+      throw new Error("Não foi possível atualizar o acompanhamento da coleta.");
+    }
   }
 
-  await progress("repositorios", `Login confirmado na conta ${login}. Encontrando repositórios…`);
-  const repos = await fetchRepos(userId);
-  await progress("commits", `${repos.length} repositório(s) encontrado(s). Buscando commits novos…`);
-  const maxCommits = settings.max_commits_per_day ?? 15;
-  const commitsToProcess: Array<{
-    repo: string;
-    sha: string;
-    message: string;
-    date?: string;
-    url: string;
-  }> = [];
+  try {
+    // 2. Valida configurações e horário de automação
+    const configuracoes = await obterOuCriarConfiguracoesAutomacao(supabaseAdmin, idUsuario);
+    if (!configuracoes.enabled && gatilho === "cron") {
+      await atualizarProgresso("skipped", "Automação desativada nas configurações do usuário.");
+      return {
+        runId,
+        status: "skipped",
+        commitsFound: 0,
+        repositories: [],
+        message: "Automação desativada nas configurações.",
+      };
+    }
 
-  for (const repo of repos.slice(0, 50)) {
-    const [owner, name] = repo.full_name.split("/");
-    if (!owner || !name) continue;
-    await progress("commits", `Repositório encontrado: ${repo.full_name}. Buscando commits novos…`, commitsToProcess.length, [...new Set(commitsToProcess.map((c) => c.repo))]);
-    const seen = await loadSeenShas(supabaseAdmin, userId, repo.full_name);
+    // 3. Define a janela de tempo da busca (desde a última coleta com sucesso)
+    const desdeQuando =
+      (await buscarDataUltimaColetaComSucesso(supabaseAdmin, idUsuario)) ??
+      calcularDataInicialPadrao(configuracoes.timezone);
+
+    await supabaseAdmin
+      .from("collection_runs")
+      .update({ since_at: desdeQuando })
+      .eq("id", runId)
+      .eq("user_id", idUsuario);
+
+    // 4. Confirma o login da conta do GitHub
+    let loginUsuario: string;
     try {
-      const commits = await fetchCommits(userId, owner, name, login, since);
-      for (const c of commits) {
-        if (seen.has(c.sha)) continue;
-        commitsToProcess.push({
-          repo: repo.full_name,
-          sha: c.sha,
-          message: c.commit.message,
-          url: c.html_url,
-          ...(c.commit.author?.date ? { date: c.commit.author.date } : {}),
-        });
-        if (commitsToProcess.length >= maxCommits) break;
+      loginUsuario = await buscarLoginUsuario(idUsuario);
+      await saveAccountLogin(idUsuario, GITHUB_CONNECTOR_ID, loginUsuario);
+    } catch (erro) {
+      const mensagem =
+        erro instanceof Error ? erro.message : "Falha ao identificar conta do GitHub.";
+      await supabaseAdmin
+        .from("collection_runs")
+        .update({
+          user_id: idUsuario,
+          trigger: gatilho,
+          since_at: desdeQuando,
+          until_at: inicioExecucao,
+          commits_found: 0,
+          repositories: [],
+          status: "erro",
+          message: mensagem,
+        })
+        .eq("id", runId)
+        .eq("user_id", idUsuario);
+
+      return {
+        runId,
+        status: "erro",
+        commitsFound: 0,
+        repositories: [],
+        message: mensagem,
+      };
+    }
+
+    // 5. Busca repositórios ativos do usuário
+    await atualizarProgresso(
+      "repositorios",
+      `Conta conectada (@${loginUsuario}). Localizando repositórios ativos…`,
+    );
+    const repositorios = await buscarRepositoriosUsuario(idUsuario);
+
+    await atualizarProgresso(
+      "commits",
+      `${repositorios.length} repositório(s) encontrado(s). Varrendo commits recentes…`,
+    );
+
+    const limiteMaximoCommits = configuracoes.max_commits_per_day ?? 15;
+    const commitsParaProcessar: Array<{
+      repo: string;
+      sha: string;
+      message: string;
+      date?: string;
+      url: string;
+    }> = [];
+
+    // Varrer até 50 repositórios mais recentes
+    for (const repo of repositorios.slice(0, 50)) {
+      await atualizarProgresso(
+        "commits",
+        `Repositório: ${repo.nomeCompleto}. Buscando novos commits…`,
+        commitsParaProcessar.length,
+        [...new Set(commitsParaProcessar.map((c) => c.repo))],
+      );
+
+      const commitsJaVistos = await carregarHashesProcessados(
+        supabaseAdmin,
+        idUsuario,
+        repo.nomeCompleto,
+      );
+
+      try {
+        const commitsEncontrados = await buscarCommitsDoAutor(
+          idUsuario,
+          repo.dono,
+          repo.nome,
+          loginUsuario,
+          desdeQuando,
+        );
+
+        for (const commit of commitsEncontrados) {
+          // Ignora commits que já foram registrados no banco
+          if (commitsJaVistos.has(commit.sha)) continue;
+
+          commitsParaProcessar.push({
+            repo: repo.nomeCompleto,
+            sha: commit.sha,
+            message: commit.dados.mensagem,
+            url: commit.urlHtml,
+            ...(commit.dados.autor?.data ? { date: commit.dados.autor.data } : {}),
+          });
+
+          if (commitsParaProcessar.length >= limiteMaximoCommits) break;
+        }
+      } catch (erro) {
+        console.error(`Erro ao consultar commits de ${repo.nomeCompleto}:`, erro);
+        throw erro;
       }
-    } catch (error) {
-      console.error(`Error fetching commits for ${repo.full_name}:`, error);
-      throw error;
-    }
-    if (commitsToProcess.length >= maxCommits) break;
-  }
 
-  if (commitsToProcess.length === 0) {
-    const { error: finishError } = await supabaseAdmin
+      if (commitsParaProcessar.length >= limiteMaximoCommits) break;
+    }
+
+    // 6. Caso nenhum commit novo tenha sido feito na janela de tempo
+    if (commitsParaProcessar.length === 0) {
+      await supabaseAdmin
+        .from("collection_runs")
+        .update({
+          user_id: idUsuario,
+          trigger: gatilho,
+          since_at: desdeQuando,
+          until_at: inicioExecucao,
+          commits_found: 0,
+          repositories: [],
+          status: "ok",
+          message: "Nenhum commit novo encontrado desde a última coleta.",
+        })
+        .eq("id", runId)
+        .eq("user_id", idUsuario);
+
+      return {
+        runId,
+        status: "ok",
+        commitsFound: 0,
+        repositories: [],
+        message: "Nenhum commit novo encontrado desde a última coleta.",
+      };
+    }
+
+    // 7. Obtenção detalhada dos diffs com sanitização de ruídos
+    const blocosDiffsTexto: string[] = [];
+    const repositoriosComCommits = new Set<string>();
+
+    for (const [indice, commit] of commitsParaProcessar.entries()) {
+      await atualizarProgresso(
+        "diffs",
+        `Lendo diffs: ${indice + 1}/${commitsParaProcessar.length} · ${commit.repo} (${commit.sha.slice(0, 7)})`,
+        blocosDiffsTexto.length,
+        [...repositoriosComCommits],
+      );
+
+      const [dono, nome] = commit.repo.split("/");
+      if (!dono || !nome) continue;
+
+      try {
+        const detalhes = await buscarDetalhesCommit(idUsuario, dono, nome, commit.sha);
+        blocosDiffsTexto.push(montarTextoCommit(detalhes, commit.repo));
+        repositoriosComCommits.add(commit.repo);
+
+        // Marca commit como visto para não reprocessar
+        await registrarCommitProcessado(
+          supabaseAdmin,
+          idUsuario,
+          commit.repo,
+          commit.sha,
+          commit.date,
+        );
+      } catch (erro) {
+        console.error(`Erro ao ler detalhes do commit ${commit.sha}:`, erro);
+        throw erro;
+      }
+    }
+
+    if (blocosDiffsTexto.length === 0) {
+      throw new Error("Não foi possível ler os diffs dos commits encontrados. Tente novamente.");
+    }
+
+    // 8. Síntese Semântica com Inteligência Artificial
+    await atualizarProgresso(
+      "gerando",
+      `${blocosDiffsTexto.length} diff(s) processado(s). Gerando resumo e rascunho com IA…`,
+      blocosDiffsTexto.length,
+      [...repositoriosComCommits],
+    );
+
+    const payloadEntradaIA = [
+      `Usuário: ${loginUsuario}`,
+      `Período Analisado: ${desdeQuando} até ${inicioExecucao}`,
+      `Total de Commits Reais: ${blocosDiffsTexto.length}`,
+      "",
+      ...blocosDiffsTexto,
+    ].join("\n\n");
+
+    let sinteseIA: { summary: string; content: string };
+    try {
+      sinteseIA = await callAi(PROMPT_SISTEMA_COLETA, payloadEntradaIA);
+    } catch (erro) {
+      const mensagemErro =
+        erro instanceof Error ? erro.message : "Falha ao processar resumo com IA.";
+
+      await supabaseAdmin
+        .from("collection_runs")
+        .update({
+          user_id: idUsuario,
+          trigger: gatilho,
+          since_at: desdeQuando,
+          until_at: inicioExecucao,
+          commits_found: blocosDiffsTexto.length,
+          repositories: Array.from(repositoriosComCommits),
+          status: "erro",
+          message: mensagemErro,
+        })
+        .eq("id", runId)
+        .eq("user_id", idUsuario);
+
+      return {
+        runId,
+        status: "erro",
+        commitsFound: blocosDiffsTexto.length,
+        repositories: Array.from(repositoriosComCommits),
+        message: mensagemErro,
+      };
+    }
+
+    // 9. Persistência do Registro Diário ('day_entries') e Rascunho ('post_drafts')
+    await atualizarProgresso(
+      "salvando",
+      "Síntese concluída! Salvando o rascunho de post para sua revisão…",
+      blocosDiffsTexto.length,
+      [...repositoriosComCommits],
+    );
+
+    const dataHoje = new Date().toISOString().slice(0, 10);
+
+    const { data: entradaDiaria, error: erroEntrada } = await supabaseAdmin
+      .from("day_entries")
+      .insert({
+        user_id: idUsuario,
+        entry_date: dataHoje,
+        raw_notes: sinteseIA.summary,
+        source: "github",
+      })
+      .select("id")
+      .single();
+
+    if (erroEntrada) throw erroEntrada;
+
+    const { data: rascunho, error: erroRascunho } = await supabaseAdmin
+      .from("post_drafts")
+      .insert({
+        user_id: idUsuario,
+        day_entry_id: entradaDiaria.id,
+        summary: sinteseIA.summary,
+        content: sinteseIA.content,
+        tone: configuracoes.default_tone ?? "profissional",
+        status: "rascunho",
+      })
+      .select("id")
+      .single();
+
+    if (erroRascunho) throw erroRascunho;
+
+    // 10. Finaliza a rodada com sucesso
+    const mensagemSucesso = `Rascunho gerado com sucesso a partir de ${blocosDiffsTexto.length} commit(s).`;
+
+    await supabaseAdmin
       .from("collection_runs")
       .update({
-        user_id: userId,
-        trigger,
-        since_at: since,
-        until_at: runStart,
-        commits_found: 0,
-        repositories: [],
+        user_id: idUsuario,
+        trigger: gatilho,
+        since_at: desdeQuando,
+        until_at: inicioExecucao,
+        commits_found: blocosDiffsTexto.length,
+        repositories: Array.from(repositoriosComCommits),
+        day_entry_id: entradaDiaria.id,
+        post_draft_id: rascunho.id,
         status: "ok",
-        message: "Nenhum commit novo encontrado desde a última coleta.",
+        message: mensagemSucesso,
       })
-      .eq("id", runId).eq("user_id", userId);
-    if (finishError) throw new Error("Não foi possível salvar o resultado da coleta.");
+      .eq("id", runId)
+      .eq("user_id", idUsuario);
+
     return {
       runId,
       status: "ok",
-      commitsFound: 0,
-      repositories: [],
-      message: "Nenhum commit novo encontrado.",
+      commitsFound: blocosDiffsTexto.length,
+      repositories: Array.from(repositoriosComCommits),
+      dayEntryId: entradaDiaria.id,
+      postDraftId: rascunho.id,
+      message: mensagemSucesso,
     };
-  }
+  } catch (erro) {
+    const mensagemErroGeral =
+      erro instanceof Error ? erro.message : "Não foi possível concluir o ciclo de coleta.";
 
-  // Fetch detail (with diffs) for each new commit.
-  const details: string[] = [];
-  const repositories = new Set<string>();
-  for (const [index, c] of commitsToProcess.entries()) {
-    await progress("diffs", `Lendo git diff do período: ${index + 1}/${commitsToProcess.length} · ${c.repo} · ${c.sha.slice(0, 7)}`, details.length, [...repositories]);
-    const [owner, name] = c.repo.split("/");
-    if (!owner || !name) continue;
-    try {
-      const detail = await fetchCommitDetail(userId, owner, name, c.sha);
-      details.push(buildCommitText(detail, c.repo));
-      repositories.add(c.repo);
-      await recordSeenCommit(supabaseAdmin, userId, c.repo, c.sha, c.date);
-    } catch (error) {
-      console.error(`Error fetching commit detail ${c.sha}:`, error);
-      throw error;
-    }
-  }
-
-  if (details.length === 0) throw new Error("Não foi possível ler os diffs dos commits encontrados. Tente novamente.");
-  await progress("gerando", `${details.length} diff(s) lido(s). Compondo o resumo e os possíveis aprendizados…`, details.length, [...repositories]);
-  const input = [
-    `Usuário: ${login}`,
-    `Período: ${since} até ${runStart}`,
-    `Total de commits novos: ${details.length}`,
-    "",
-    ...details,
-  ].join("\n\n");
-
-  let summary: { summary: string; content: string };
-  try {
-    summary = await callAi(COLLECT_SYSTEM, input);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Falha ao gerar resumo com IA.";
-    const { error: finishError } = await supabaseAdmin
+    await supabaseAdmin
       .from("collection_runs")
-      .update({
-        user_id: userId,
-        trigger,
-        since_at: since,
-        until_at: runStart,
-        commits_found: details.length,
-        repositories: Array.from(repositories),
-        status: "erro",
-        message,
-      })
-      .eq("id", runId).eq("user_id", userId);
-    if (finishError) throw new Error("Não foi possível salvar o resultado da coleta.");
+      .update({ status: "erro", message: mensagemErroGeral })
+      .eq("id", runId)
+      .eq("user_id", idUsuario);
+
     return {
       runId,
       status: "erro",
-      commitsFound: details.length,
-      repositories: Array.from(repositories),
-      message,
+      commitsFound: 0,
+      repositories: [],
+      message: mensagemErroGeral,
     };
-  }
-
-  await progress("salvando", "Resumo gerado. Salvando o rascunho para sua revisão…", details.length, [...repositories]);
-  const today = new Date().toISOString().slice(0, 10);
-  const { data: entry, error: entryError } = await supabaseAdmin
-    .from("day_entries")
-    .insert({
-      user_id: userId,
-      entry_date: today,
-      raw_notes: summary.summary,
-      source: "github",
-    })
-    .select("id")
-    .single();
-  if (entryError) throw entryError;
-
-  const { data: draft, error: draftError } = await supabaseAdmin
-    .from("post_drafts")
-    .insert({
-      user_id: userId,
-      day_entry_id: entry.id,
-      summary: summary.summary,
-      content: summary.content,
-      tone: settings.default_tone ?? "profissional",
-      status: "rascunho",
-    })
-    .select("id")
-    .single();
-  if (draftError) throw draftError;
-
-  const { error: finishError } = await supabaseAdmin
-    .from("collection_runs")
-    .update({
-      user_id: userId,
-      trigger,
-      since_at: since,
-      until_at: runStart,
-      commits_found: details.length,
-      repositories: Array.from(repositories),
-      day_entry_id: entry.id,
-      post_draft_id: draft.id,
-      status: "ok",
-      message: `Rascunho gerado a partir de ${details.length} commit(s).`,
-    })
-    .eq("id", runId).eq("user_id", userId);
-  if (finishError) throw new Error("Não foi possível salvar o resultado da coleta.");
-
-  return {
-    runId,
-    status: "ok",
-    commitsFound: details.length,
-    repositories: Array.from(repositories),
-    dayEntryId: entry.id,
-    postDraftId: draft.id,
-    message: `Rascunho gerado a partir de ${details.length} commit(s).`,
-  };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Não foi possível concluir a coleta.";
-    await supabaseAdmin.from("collection_runs").update({ status: "erro", message }).eq("id", runId).eq("user_id", userId);
-    return { runId, status: "erro", commitsFound: 0, repositories: [], message };
   }
 }

@@ -1,7 +1,6 @@
 /**
- * Shared AI call helper for drafting and GitHub commit summarization.
- * Supports Google Gemini (GEMINI_API_KEY) and OpenAI (OPENAI_API_KEY) directly.
- * Server-only — never import from browser bundles.
+ * Geração de rascunhos e síntese de commits com Gemini ou OpenAI.
+ * Uso exclusivo no servidor; não importar no pacote do navegador.
  */
 
 export type AiDraft = { summary: string; content: string };
@@ -43,7 +42,7 @@ export async function callAi(system: string, user: string): Promise<AiDraft> {
 
     if (!res.ok) {
       const body = await res.text();
-      console.error(`Gemini API error [${res.status}]: ${body}`);
+      console.error(`Erro na API do Gemini [${res.status}]: ${body}`);
       if (res.status === 429) throw new Error("Limite de requisições da IA atingido. Tente em instantes.");
       throw new Error(`Falha na API do Gemini (${res.status}). Verifique a GEMINI_API_KEY.`);
     }
@@ -60,7 +59,7 @@ export async function callAi(system: string, user: string): Promise<AiDraft> {
     }
   }
 
-  // 2. Fallback: OpenAI oficial direto
+  // 2. OpenAI quando não há chave Gemini; fallback após falha ainda não implementado.
   const openaiModel = process.env["OPENAI_MODEL"] || "gpt-4o-mini";
   const openaiUrl = process.env["OPENAI_BASE_URL"] || "https://api.openai.com/v1/chat/completions";
 
@@ -97,7 +96,7 @@ export async function callAi(system: string, user: string): Promise<AiDraft> {
 
   if (!res.ok) {
     const body = await res.text();
-    console.error(`OpenAI API error [${res.status}]: ${body}`);
+    console.error(`Erro na API da OpenAI [${res.status}]: ${body}`);
     if (res.status === 429) throw new Error("Muitos pedidos em sequência. Tente de novo em instantes.");
     throw new Error(`Falha na API da OpenAI (${res.status}).`);
   }

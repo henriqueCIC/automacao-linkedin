@@ -71,7 +71,7 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
 
     if (!tokenRes.ok) {
       const errBody = await tokenRes.text();
-      console.error("GitHub token exchange failed:", errBody);
+      console.error("Falha na troca do código de autorização do GitHub:", errBody);
       throw new Error("Falha ao trocar código de autorização com o GitHub.");
     }
 
@@ -95,7 +95,7 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
         accountLogin = userInfo.login ?? null;
       }
     } catch (e) {
-      console.warn("Could not fetch user login:", e);
+      console.warn("Não foi possível consultar o login do usuário:", e);
     }
 
     await saveConnectionKeyForUser(context.userId, GITHUB_CONNECTOR_ID, tokenData.access_token, accountLogin);

@@ -12,7 +12,7 @@ async function getLinkedInToken(userId?: string): Promise<string | null> {
   return process.env["LINKEDIN_ACCESS_TOKEN"] || process.env["LINKEDIN_API_KEY"] || null;
 }
 
-/** Tells the UI whether a LinkedIn account is authorized for publishing. */
+/** Informa à interface se existe uma conta LinkedIn autorizada para publicação. */
 export const getLinkedInStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
@@ -27,14 +27,14 @@ export const getLinkedInStatus = createServerFn({ method: "GET" })
 
     if (!res.ok) {
       const body = await res.text();
-      console.error(`LinkedIn userinfo failed [${res.status}]: ${body}`);
+      console.error(`Falha ao consultar identidade no LinkedIn [${res.status}]: ${body}`);
       return { connected: false as const };
     }
     const info = (await res.json()) as { sub?: string; name?: string };
     return { connected: true as const, name: info.name ?? null };
   });
 
-/** Live check of a post already sent to LinkedIn. */
+/** Consulta uma publicação já enviada ao LinkedIn. */
 export const checkPublishedPost = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: { draftId: string }) => input)
@@ -66,7 +66,7 @@ export const checkPublishedPost = createServerFn({ method: "POST" })
     );
     if (!res.ok) {
       const body = await res.text();
-      console.error(`LinkedIn post lookup failed [${res.status}]: ${body}`);
+      console.error(`Falha ao consultar publicação no LinkedIn [${res.status}]: ${body}`);
       return {
         state: "indisponivel" as const,
         url,
@@ -82,7 +82,7 @@ export const checkPublishedPost = createServerFn({ method: "POST" })
     };
   });
 
-/** Publishes ONLY a draft the user has explicitly approved. */
+/** Publica somente um rascunho explicitamente aprovado pelo usuário. */
 export const publishApprovedDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator((input: { draftId: string }) => input)
@@ -106,7 +106,7 @@ export const publishApprovedDraft = createServerFn({ method: "POST" })
     });
     if (!meRes.ok) {
       const body = await meRes.text();
-      console.error(`LinkedIn userinfo failed [${meRes.status}]: ${body}`);
+      console.error(`Falha ao consultar identidade no LinkedIn [${meRes.status}]: ${body}`);
       throw new Error("A autorização do LinkedIn precisa ser renovada.");
     }
     const me = (await meRes.json()) as { sub?: string };
@@ -134,7 +134,7 @@ export const publishApprovedDraft = createServerFn({ method: "POST" })
 
     if (!postRes.ok) {
       const body = await postRes.text();
-      console.error(`LinkedIn publish failed [${postRes.status}]: ${body}`);
+      console.error(`Falha ao publicar no LinkedIn [${postRes.status}]: ${body}`);
       throw new Error(`O LinkedIn recusou a publicação (${postRes.status}).`);
     }
 

@@ -1,327 +1,115 @@
-# 🚀 Automação LinkedIn (DevLog to Social Engine)
+# Automação LinkedIn
 
-<div align="center">
+**Versão preparada: 0.1.0 — experimental, anterior à fundação de testes.**
 
-![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue?style=for-the-badge&logo=typescript)
-![React](https://img.shields.io/badge/React-19-61DAFB?style=for-the-badge&logo=react)
-![TanStack Start](https://img.shields.io/badge/TanStack_Start-Fullstack_SSR-FF4154?style=for-the-badge&logo=react-query)
-![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL_%2B_RLS-3ECF8E?style=for-the-badge&logo=supabase)
-![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4.0-38B2AC?style=for-the-badge&logo=tailwind-css)
-![Google Gemini](https://img.shields.io/badge/Google_Gemini-2.0_Flash-4285F4?style=for-the-badge&logo=google)
+Transforma atividades de desenvolvimento em rascunhos para revisão humana. Este repositório registra o ponto de partida de um case de automação com IA. Não representa uma versão pronta para produção. A preparação local não significa que a versão já foi enviada ao GitHub; consulte o relatório de liberação.
 
-**Transforme seus commits diários do GitHub em publicações de alto engajamento no LinkedIn automaticamente, sem atrito e sem interromper seu fluxo de desenvolvimento.**
+## Objetivo
 
-[Visão Geral](#-visão-geral) • [O Motor do Produto](#-o-motor-do-produto-core-engine) • [Modelagem de Dados (DER)](#-modelagem-de-dados-der--erd) • [Arquitetura & Fluxo](#-arquitetura--fluxo-de-dados) • [Deep Dive no Código](#-deep-dive-no-código-partes-críticas) • [Como Rodar](#-como-rodar-o-projeto)
+Aprender e demonstrar engenharia de software aplicada à IA: contratos tipados, testes de comportamento, recuperação de falhas, segurança, observabilidade e aprovação humana. LangGraph será considerado somente depois da estabilização e aprovação das etapas de qualidade.
 
-</div>
+## Recursos presentes no código
 
----
+- Autenticação com Supabase e conexão OAuth com GitHub.
+- Consulta de repositórios, commits e diffs; filtro de arquivos e acompanhamento da coleta.
+- Anotações manuais e importação de texto.
+- Geração e refinamento de rascunhos com Gemini ou OpenAI.
+- Edição, aprovação e solicitação de publicação pela API oficial do LinkedIn.
+- Histórico, preferências de coleta e temas claro/escuro.
 
-## 📌 Visão Geral
+A existência do código não comprova o funcionamento ponta a ponta. Não há automação de navegador para publicar no LinkedIn. A publicação exige revisão humana.
 
-Desenvolvedores produzem código todos os dias, mas raramente constroem presença digital ("Building in Public") pela fricção de parar o trabalho para redigir posts sobre o que foi feito. 
-
-A **Automação LinkedIn** resolve essa dor:
-1. Conecta-se de forma segura à sua conta do **GitHub**.
-2. Rastreia seus commits diários e filtra apenas o código de valor real (ignorando `lockfiles`, builds e assets pesados).
-3. Utiliza **Inteligência Artificial (Google Gemini 2.0 Flash / OpenAI)** com engenharia de prompts refinada para traduzir diffs técnicos em narrativas claras e atraentes.
-4. Gera rascunhos com múltiplos tons de voz (*profissional*, *storytelling*, *técnico*) prontos para aprovação e publicação direta na API oficial do **LinkedIn**.
-
----
-
-## ⚙️ O Motor do Produto (Core Engine)
-
-O ciclo de funcionamento contínuo do sistema baseia-se em 4 etapas sincronizadas:
+## Fluxo atual
 
 ```mermaid
-flowchart TD
-    subgraph Ingestao ["1. Ingestão & Desduplicação"]
-        GH["GitHub API v3"] -->|"Varredura de Commits"| Collector["Collect Server Engine"]
-        Collector -->|"Verifica SHAs processados"| SeenCommits[("seen_commits (DB)")]
-    end
-
-    subgraph Inteligencia ["2. Síntese Semântica"]
-        Collector -->|"Filtra ruídos & locks"| CleanDiff["Payload Sanitizado"]
-        CleanDiff -->|"Prompt com Tom do Usuário"| GeminiAI["Google Gemini 2.0 Flash"]
-        GeminiAI -->|"Structured JSON Output"| PostDraft["Rascunho de Post (DB)"]
-    end
-
-    subgraph Interacao ["3. Curadoria & Publicação"]
-        PostDraft -->|"Painel SSR TanStack Start"| UserReview["Revisão & Ajuste pelo Usuário"]
-        UserReview -->|"Aprovação em 1 Clique"| LinkedInAPI["LinkedIn Official REST API"]
-    end
-
-    Ingestao --> Inteligencia --> Interacao
+flowchart LR
+  A[GitHub] --> B[Coleta e consulta de commits já vistos]
+  B --> C[Filtro de arquivos e truncamento de diffs]
+  C --> D[Marcação antecipada em seen_commits]
+  D --> E[Gemini ou OpenAI]
+  E --> F[day_entries e post_drafts]
+  F --> G[Revisão e aprovação humana]
+  G --> H[API oficial do LinkedIn]
 ```
 
----
+A marcação antecipada é uma falha conhecida: se a IA ou a gravação falhar, uma tentativa posterior pode ignorar commits ainda sem rascunho.
 
-## 🗄️ Modelagem de Dados (DER / ERD)
+## Tecnologias e organização
 
-O esquema relacional é implementado no **PostgreSQL (Supabase)** com isolamento multi-tenant estrito garantido por **Row-Level Security (RLS)** em todas as tabelas:
+TypeScript, React, TanStack Start, Vite, Tailwind, Supabase/PostgreSQL e chamadas HTTP às APIs GitHub, LinkedIn e LLMs. As versões efetivas das dependências estão em `package-lock.json`.
 
-```mermaid
-erDiagram
-    USERS ||--|| PROFILES : "possui perfil"
-    USERS ||--o{ APP_USER_CONNECTIONS : "autentica conectores"
-    USERS ||--|| AUTOMATION_SETTINGS : "configura rotinas"
-    USERS ||--o{ DAY_ENTRIES : "registra notas diárias"
-    USERS ||--o{ SEEN_COMMITS : "rastreia commits únicos"
-    USERS ||--o{ COLLECTION_RUNS : "executa coletas"
-    USERS ||--o{ POST_DRAFTS : "gera rascunhos"
-    
-    DAY_ENTRIES ||--o{ POST_DRAFTS : "origina"
-    COLLECTION_RUNS ||--o| DAY_ENTRIES : "cria"
-    COLLECTION_RUNS ||--o| POST_DRAFTS : "vincula"
+| Diretório | Responsabilidade |
+| --- | --- |
+| `src/routes/` | Telas e endpoint de coleta |
+| `src/lib/` | Coleta, IA, credenciais e publicação |
+| `src/integrations/supabase/` | Clientes, autenticação e tipos do banco |
+| `src/components/` | Componentes compartilhados |
+| `supabase/migrations/` | Estrutura e políticas declaradas do banco |
+| `docs/` | Planejamento e evidências |
 
-    PROFILES {
-        uuid id PK "auth.users.id"
-        text display_name
-        text headline
-        text default_tone "profissional | tecnico | storytelling"
-        timestamptz created_at
-        timestamptz updated_at
-    }
+Interface e documentação próprias usam português. Identificadores técnicos, tabelas, contratos de APIs e arquivos gerados preservam os nomes existentes. Comentários legados ainda podem conter inglês; a revisão não inclui renomear toda a base nem modificar código gerado.
 
-    APP_USER_CONNECTIONS {
-        uuid id PK
-        uuid user_id FK "auth.users.id"
-        text connector_id "github | linkedin"
-        text connection_key_ciphertext "AES-256-GCM Encrypted"
-        text account_login
-        boolean reconnect_required
-        timestamptz updated_at
-    }
+## Execução local
 
-    AUTOMATION_SETTINGS {
-        uuid user_id PK "auth.users.id"
-        boolean enabled "Default: true"
-        time daily_time "Default: 18:00"
-        text timezone "America/Bahia"
-        integer max_commits_per_day "Default: 15"
-        boolean notify_desktop
-        boolean notify_email
-        date last_run_date
-    }
+1. Instale uma versão de Node compatível com os `engines` das dependências travadas.
+2. Execute `npm ci`.
+3. Copie `.env.example` para `.env` e preencha os valores localmente. Nunca envie esse arquivo ao Git.
+4. Configure um projeto Supabase de desenvolvimento e aplique as migrações com revisão; a aplicação não provisiona o banco ao iniciar.
+5. Configure as URLs de redirecionamento e os provedores utilizados. Na visualização atual, a origem local é `http://localhost:5173` e o retorno GitHub é `/oauth/github/return`.
+6. Execute `npm run dev` e use o endereço informado no terminal.
 
-    DAY_ENTRIES {
-        uuid id PK
-        uuid user_id FK "auth.users.id"
-        date entry_date
-        text raw_notes "Resumo do trabalho"
-        text source "github | manual"
-        timestamptz created_at
-    }
+Para visualizar a autenticação, as configurações Supabase precisam estar válidas. Para gerar rascunhos são necessárias credenciais de IA; para coletar, uma conexão GitHub. Não existe modo de demonstração com dados fictícios nesta versão.
 
-    SEEN_COMMITS {
-        uuid id PK
-        uuid user_id FK "auth.users.id"
-        text repo_full_name
-        text commit_sha "Chave única (user_id, repo, sha)"
-        timestamptz committed_at
-    }
+### Configuração e segredos
 
-    COLLECTION_RUNS {
-        uuid id PK
-        uuid user_id FK "auth.users.id"
-        text trigger "cron | manual"
-        integer commits_found
-        text_array repositories
-        text status "ok | error"
-        uuid post_draft_id FK
-        timestamptz created_at
-    }
+- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e suas variantes `VITE_` são configurações do cliente/servidor.
+- `SUPABASE_SERVICE_ROLE_KEY`, credenciais OAuth, chaves de IA e `ENCRYPTION_SECRET` pertencem exclusivamente ao servidor.
+- Nunca coloque segredos em variáveis `VITE_`: elas podem integrar o pacote do navegador.
+- Gere sua própria chave de criptografia de 32 bytes em base64. Não dependa da chave fixa de fallback existente nesta versão.
+- Escolha um modelo disponível por `GEMINI_MODEL` ou `OPENAI_MODEL`; o padrão Gemini no código precisa de revisão.
+- `LINKEDIN_ACCESS_TOKEN` é um fallback global legado, inadequado para uso multiusuário.
+- A rota ativa do cron consulta `cron_secrets` no banco. O helper que lê `CRON_SECRET` não está conectado a ela. Não há agendador externo configurado neste repositório.
+- `.env.example` contém somente exemplos. Ambientes, chaves privadas, builds e artefatos locais devem permanecer fora do Git.
 
-    POST_DRAFTS {
-        uuid id PK
-        uuid user_id FK "auth.users.id"
-        uuid day_entry_id FK
-        text summary
-        text content "Corpo formatado para LinkedIn"
-        text tone
-        text status "rascunho | aprovado | publicado"
-        text linkedin_post_id "Retorno da API do LinkedIn"
-        timestamptz published_at
-    }
+## Verificações
+
+```sh
+npm run lint
+./node_modules/.bin/tsc --noEmit --incremental false
+npm run build
 ```
 
----
+Ainda não há framework de testes, pasta `tests/`, script `test` ou script `typecheck`. Nenhuma suíte automatizada pode ser declarada aprovada.
 
-## 🏛️ Arquitetura & Fluxo de Dados
+Os resultados desta preparação estão em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md). Falhas de lint não devem ser ocultadas ou resolvidas desativando regras. Build aprovado não comprova segurança nem funcionamento das APIs.
 
-A aplicação utiliza arquitetura moderna com **Server Functions** do TanStack Start e isolamento de segredos no servidor:
+## Erros e limitações conhecidos da 0.1.0
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Usuário / Cron Diário
-    participant Web as TanStack Start (SSR Frontend)
-    participant Server as Nitro Server Function
-    participant Crypto as Crypto Vault (AES-GCM)
-    participant GH as GitHub API
-    participant AI as Gemini 2.0 Flash
-    participant DB as Supabase PostgreSQL
+| ID | Prioridade | Problema observado | Correção planejada |
+| --- | --- | --- | --- |
+| Q01 | Alta | Lint reprovado e ausência de testes | Etapa 1: baseline, Vitest e testes reais |
+| IA01 | Alta | Saída da IA sem validação em execução; JSON inválido pode virar texto | Etapa 2: schemas, erros explícitos e regressões |
+| IA02 | Alta | Falha Gemini não aciona OpenAI; timeout explícito ausente | Etapa 2: política de falhas, timeout e fallback testado |
+| IA03 | Média | Prompt inclui roadmap fixo e o tom da coleta não orienta a geração | Etapa 2: separar planejamento e conteúdo, aplicar tom |
+| D01 | Alta | Commits marcados antes de salvar rascunho | Etapa 3: confirmação transacional e recuperação |
+| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | Etapa 3: preservar pendências por repositório |
+| D03 | Alta | Gravações e conclusão de execução ignoram alguns erros | Etapa 3: verificar todos os resultados de persistência |
+| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | Etapa 3: concorrência, tentativas e reconciliação |
+| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | Correção de segurança antes de produção |
+| S02 | Alta | OAuth GitHub não valida o state de retorno | Correção de segurança com teste de regressão |
+| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | OAuth individual e remoção do fallback multiusuário |
+| S04 | Alta | Filtro de ruído não é filtro de segredos | Sanitização e seleção de repositórios antes de enviar diffs |
+| A01 | Alta | Cron marca o dia mesmo após resultado de erro | Etapa 3: separar tentativa de sucesso e impedir sobreposição |
+| A02 | Alta | Fuso America/Rio_de_Janeiro inválido e cálculos de data inconsistentes | Etapa 3: validação e datas determinísticas |
+| U01 | Média | Preferências de notificação sem entrega implementada | Implementação posterior com testes |
+| U02 | Média | Cache de algumas consultas não inclui usuário | Etapas 3–4: isolamento de sessão e E2E |
+| F01 | Média | Filtro rejeita src/rebuild/app.ts por substring; entrada vazia é aceita | Etapa 1: testes e limites de segmentos |
+| T01 | Média | Tipos de domínio e contratos de tons ainda divergem | Ajustar contratos conforme uso real |
 
-    Dev->>Server: Dispara Coleta (/api/public/coletar ou via UI)
-    Server->>DB: Busca credencial criptografada do usuário
-    Server->>Crypto: decryptConnectionKey(ciphertext)
-    Crypto-->>Server: Token GitHub puro (descriptografado na RAM)
-    Server->>GH: GET /user/repos e GET /commits (since yesterday)
-    GH-->>Server: Retorna lista de commits
-    Server->>DB: Filtra commits já existentes em 'seen_commits'
-    Server->>AI: Envia commits filtrados com prompt de tom
-    AI-->>Server: Retorna JSON estruturado { summary, content }
-    Server->>DB: Insere em 'day_entries', 'seen_commits' e 'post_drafts'
-    Server-->>Web: Atualiza UI reativamente via TanStack Query
-    Web-->>Dev: Notifica: "Rascunho do dia pronto para revisão!"
-```
+A auditoria anterior apontou também um alerta alto em Zod. Isso deve ser revalidado antes de atualizar dependências; não foi executada atualização automática nesta preparação.
 
----
+## Roteiro e versionamento
 
-## 🔍 Deep Dive no Código (Partes Críticas)
+Leia [roadmap.md](roadmap.md) e [CHANGELOG.md](CHANGELOG.md). Cada etapa termina com evidências e aprovação humana. O marco `v0.1.0` só deve ser criado e enviado após a liberação do gate de publicação; a branch proposta para o trabalho seguinte é `melhoria/fundacao-testes`.
 
-### 1. Criptografia Segura de Tokens OAuth (`AES-256-GCM`)
-Tokens do GitHub e LinkedIn nunca são salvos em texto puro no banco. O servidor utiliza o padrão bancário **AES-256-GCM com Initialization Vector (IV) aleatório de 12 bytes e Auth Tag de integridade**:
-
-```typescript
-// src/lib/connectionKeyCrypto.server.ts
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
-
-export function encryptConnectionKey(plaintext: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", getMasterKey(), iv);
-  const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-  // Concatena IV + Auth Tag + Ciphertext em Base64
-  return Buffer.concat([iv, cipher.getAuthTag(), ct]).toString("base64");
-}
-
-export function decryptConnectionKey(stored: string): string {
-  const buf = Buffer.from(stored, "base64");
-  const iv = buf.subarray(0, 12);
-  const tag = buf.subarray(12, 28);
-  const ct = buf.subarray(28);
-  const decipher = createDecipheriv("aes-256-gcm", getMasterKey(), iv);
-  decipher.setAuthTag(tag);
-  return Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
-}
-```
-
----
-
-### 2. Filtro Anti-Ruído e Ingestão de Commits
-Commits em lockfiles ou pastas de dependências não representam trabalho autoral do desenvolvedor. O `collect.server.ts` aplica um sanitizador por Expressões Regulares antes de alimentar a IA:
-
-```typescript
-// src/lib/collect.server.ts
-const IGNORED_PATHS = [
-  /package-lock\.json$/,
-  /yarn\.lock$/,
-  /pnpm-lock\.yaml$/,
-  /bun\.lockb$/,
-  /dist\//,
-  /build\//,
-  /node_modules\//,
-  /\.png$/, /\.jpg$/, /\.svg$/
-];
-
-// Garante que a IA receba apenas o delta de código relevante, 
-// economizando tokens e gerando posts com alto contexto técnico.
-```
-
----
-
-### 3. Síntese Inteligente com Google Gemini Estruturado
-A chamada para o Gemini utiliza **Structured Outputs (`response_schema`)** nativo da API v1beta do Google, garantindo que o retorno seja sempre um JSON válido sem falhas de parse:
-
-```typescript
-// src/lib/ai.server.ts
-const res = await fetch(geminiUrl, {
-  method: "POST",
-  headers: { "Content-Type": "application/json" },
-  body: JSON.stringify({
-    system_instruction: { parts: [{ text: systemPrompt }] },
-    contents: [{ parts: [{ text: userContent }] }],
-    generationConfig: {
-      response_mime_type: "application/json",
-      response_schema: {
-        type: "OBJECT",
-        properties: {
-          summary: { type: "STRING" },
-          content: { type: "STRING" }
-        },
-        required: ["summary", "content"]
-      }
-    }
-  })
-});
-```
-
----
-
-## 🛠️ Stack Tecnológica
-
-| Camada | Tecnologia | Propósito |
-| :--- | :--- | :--- |
-| **Framework Fullstack** | **TanStack Start (Vite + Nitro)** | Renderização SSR rápida, rotas baseadas em arquivos e Server Functions seguras. |
-| **UI & Estilização** | **Tailwind CSS v4 + Radix UI** | Interface fluida, acessível e suporte nativo a temas Dark/Light. |
-| **Gerenciamento de Estado** | **TanStack Query v5** | Cache e sincronização reativa dos dados de coletas e rascunhos. |
-| **Banco de Dados & Auth** | **Supabase (PostgreSQL)** | Autenticação Google/GitHub OAuth, RLS e triggers de atualização. |
-| **Inteligência Artificial** | **Google Gemini 2.0 Flash** | Geração ultrarrápida de posts com saída em JSON estruturado (com fallback OpenAI). |
-| **Segurança** | **Node.js Crypto (AES-256-GCM)** | Criptografia simétrica autenticada para tokens sensíveis de OAuth. |
-
----
-
-## 🚀 Como Rodar o Projeto
-
-### Pré-requisitos
-* **Node.js 20+** ou **Bun** instalado.
-* Um projeto no **Supabase** (banco PostgreSQL).
-* Uma chave de API do **Google AI Studio** (`GEMINI_API_KEY`).
-
-### Passo a Passo
-
-1. **Clone o repositório:**
-   ```bash
-   git clone https://github.com/SEU_USUARIO/automacao-linkedinsk.git
-   cd automacao-linkedinsk
-   ```
-
-2. **Instale as dependências:**
-   ```bash
-   npm install
-   ```
-
-3. **Configure as Variáveis de Ambiente:**
-   Copie o arquivo de exemplo:
-   ```bash
-   cp .env.example .env
-   ```
-   Preencha as chaves:
-   * `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`
-   * `SUPABASE_SERVICE_ROLE_KEY` (usada exclusivamente no backend pelo Nitro)
-   * `GEMINI_API_KEY` (gratuita via [Google AI Studio](https://aistudio.google.com/))
-   * `ENCRYPTION_SECRET` (chave de 32 bytes em base64 para o cofre AES-GCM)
-
-4. **Inicie o servidor de desenvolvimento:**
-   ```bash
-   npm run dev
-   ```
-   O aplicativo estará disponível em: `http://localhost:3000`
-
----
-
-## 🗺️ Roadmap de Evolução
-
-- [x] Desacoplamento de plataformas proprietárias e arquitetura TanStack Start limpa.
-- [x] Ingestão de commits diretamente pela API oficial do GitHub.
-- [x] Criptografia de ponta a ponta para credenciais OAuth com AES-256-GCM.
-- [x] Integração nativa com Google Gemini 2.0 Flash e fallback OpenAI.
-- [ ] Envio de e-mail diário com rascunhos prontos (via Resend).
-- [ ] Geração automática de carrosséis em PDF para o LinkedIn baseados no post.
-- [ ] Ajuste fino do estilo de escrita por aprendizado com posts anteriores do usuário.
-
----
-
-<div align="center">
-Desenvolvido com foco em alta engenharia de software e privacidade de dados.
-</div>
+A documentação de falhas não equivale à liberação do gate. Enquanto houver pendências obrigatórias de testes ou auditoria, a preparação permanece local.

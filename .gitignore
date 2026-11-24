@@ -1,9 +1,9 @@
-# Environment variables
+# Variáveis de ambiente
 .env
-.env*.local
+.env.*
 !.env.example
 
-# Logs
+# Registros locais
 logs
 *.log
 npm-debug.log*
@@ -25,7 +25,7 @@ dist-ssr
 .wrangler/
 .dev.vars
 
-# Editor directories and files
+# Editores e arquivos do sistema
 .vscode/*
 !.vscode/extensions.json
 .idea
@@ -35,3 +35,14 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Credenciais e artefatos locais de ferramentas
+*.pem
+*.key
+*.p12
+*.pfx
+.npmrc
+.superpowers/
+.lovable/
+graphify-out/
+supabase/.temp/

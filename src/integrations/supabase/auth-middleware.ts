@@ -50,27 +50,27 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
     const request = getRequest();
 
     if (!request?.headers) {
-      throw new Error('Unauthorized: No request headers available');
+      throw new Error('Não autorizado: cabeçalhos da requisição ausentes');
     }
 
 
     const authHeader = request.headers.get('authorization');
 
     if (!authHeader) {
-      throw new Error('Unauthorized: No authorization header provided');
+      throw new Error('Não autorizado: cabeçalho de autorização ausente');
     }
 
     if (!authHeader.startsWith('Bearer ')) {
-      throw new Error('Unauthorized: Only Bearer tokens are supported');
+      throw new Error('Não autorizado: utilize um token Bearer');
     }
 
     const token = authHeader.replace('Bearer ', '');
     if (!token) {
-      throw new Error('Unauthorized: No token provided');
+      throw new Error('Não autorizado: token ausente');
     }
 
     if (token.split('.').length !== 3) {
-      throw new Error('Unauthorized: Invalid token');
+      throw new Error('Não autorizado: token inválido');
     }
 
     const supabase = createClient<Database>(
@@ -93,11 +93,11 @@ export const requireSupabaseAuth = createMiddleware({ type: 'function' }).server
 
     const { data, error } = await supabase.auth.getClaims(token);
     if (error || !data?.claims) {
-      throw new Error('Unauthorized: Invalid token');
+      throw new Error('Não autorizado: token inválido');
     }
 
     if (!data.claims.sub) {
-      throw new Error('Unauthorized: No user ID found in token');
+      throw new Error('Não autorizado: identificador do usuário ausente no token');
     }
 
     return next({
