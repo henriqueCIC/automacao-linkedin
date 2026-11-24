@@ -125,19 +125,19 @@ Registros detalhados em [docs/VERIFICACAO_ETAPA3_1.md](docs/VERIFICACAO_ETAPA3_1
 Registro detalhado em [docs/VERIFICACAO_ETAPA4.md](docs/VERIFICACAO_ETAPA4.md).
 
 - **Suíte E2E isolada (`playwright.config.ts`, `tests/e2e/`):** Servidor local determinístico (`tests/e2e/helpers/mock-services-server.mjs`) simulando Supabase Auth/PostgREST com RLS, GitHub, Gemini e LinkedIn UGC API sem chamadas externas, sem cobrança e sem publicar em contas reais.
-- **Cobertura ponta a ponta (`tests/e2e/fluxo-principal.spec.ts`):** Autenticação e proteção de rotas, coleta do GitHub, revisão/edição de rascunho com bloqueio do botão `"Publicar agora"` até aprovação humana explícita (`"Aprovar este texto"`), modal de confirmação (`alertdialog`), publicação simulada, consulta de status em `/publicacoes`, criação manual, refinamento iterativo com feedback, tratamento resiliente de falha HTTP 500 da IA, alternância de tema claro/escuro, navegação por `/coletas`, `/fontes` e `/configuracoes`, e isolamento total de dados na troca de usuário (`Ana` → `Bruno`).
+- **Cobertura ponta a ponta e QA Exploratório (`tests/e2e/fluxo-principal.spec.ts`, `tests/e2e/qa-exploratorio.spec.ts`):** Autenticação e proteção de todas as 6 rotas privadas, página 404, coleta do GitHub, revisão/edição de rascunho com bloqueio do botão `"Publicar agora"` até aprovação humana explícita (`"Aprovar este texto"`), bloqueio de aprovação para texto `< 20` ou `> 3.000` caracteres, salvamento intermediário e rejeição de rascunho, modal de confirmação (`alertdialog`), publicação simulada, consulta de status em `/publicacoes`, criação manual, importação de arquivo `.md`, refinamento iterativo com feedback, tratamento resiliente de falha HTTP 500 da IA, erros de retorno OAuth em `/oauth/github/return`, desconexão de GitHub em `/fontes`, alternância de tema claro/escuro, responsividade mobile (`375x667` sem overflow horizontal) e isolamento total de dados na troca de usuário (`Ana` → `Bruno`).
 - **Compatibilidade WebSocket em Node.js 20 (`src/lib/websocket-compat.ts`):** Correção de regressão detectada pelos testes E2E onde `@supabase/realtime-js` exigia `globalThis.WebSocket` ao instanciar `createClient` no servidor em Node.js 20.
 
 ### Evidências Consolidadas na Branch
 
-| Verificação                           | Comando             | Resultado Atual                                                               |
-| ------------------------------------- | ------------------- | ----------------------------------------------------------------------------- |
-| **Testes Unitários + Integração**     | `npm test`          | ✅ **56/56 passando** (8 arquivos em `tests/unit/` e `tests/integration/`)    |
-| **Testes Ponta a Ponta (Playwright)** | `npm run test:e2e`  | ✅ **4/4 cenários completos passando** (Chromium + servidor simulado isolado) |
-| **TypeScript Estrito**                | `npm run typecheck` | ✅ **0 erros**                                                                |
-| **ESLint + Prettier**                 | `npm run lint`      | ✅ **0 erros** _(7 avisos padrão do shadcn/ui `react-refresh`)_               |
-| **Build de Produção**                 | `npm run build`     | ✅ **Compilado** (cliente + servidor)                                         |
-| **Higiene de Diff**                   | `git diff --check`  | ✅ **0 problemas**                                                            |
+| Verificação                           | Comando             | Resultado Atual                                                                  |
+| ------------------------------------- | ------------------- | -------------------------------------------------------------------------------- |
+| **Testes Unitários + Integração**     | `npm test`          | ✅ **56/56 passando** (8 arquivos em `tests/unit/` e `tests/integration/`)       |
+| **Testes Ponta a Ponta (Playwright)** | `npm run test:e2e`  | ✅ **8/8 cenários E2E + QA Exploratório passando** (Chromium + servidor isolado) |
+| **TypeScript Estrito**                | `npm run typecheck` | ✅ **0 erros**                                                                   |
+| **ESLint + Prettier**                 | `npm run lint`      | ✅ **0 erros** _(7 avisos padrão do shadcn/ui `react-refresh`)_                  |
+| **Build de Produção**                 | `npm run build`     | ✅ **Compilado** (cliente + servidor)                                            |
+| **Higiene de Diff**                   | `git diff --check`  | ✅ **0 problemas**                                                               |
 
 Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Os pareceres das duas auditorias independentes (Conformidade e Adversarial) que aprovaram as Etapas 1 a 4 no Gate Global da Fase 6 estão registrados em [docs/AUDITORIAS_ETAPAS_1_A_4.md](docs/AUDITORIAS_ETAPAS_1_A_4.md).
 

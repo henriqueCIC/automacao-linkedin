@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,9 +26,14 @@ export const Route = createFileRoute("/fontes")({
 });
 
 function FontesPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["github-status", user?.id],
@@ -64,6 +69,14 @@ function FontesPage() {
     },
     onError: (err: Error) => setMessage(err.message),
   });
+
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="paper-grain min-h-screen px-4 py-12">

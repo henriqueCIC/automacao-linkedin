@@ -1,5 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -24,12 +25,26 @@ export const Route = createFileRoute("/coletas")({
 });
 
 function ColetasPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
+
   const { data: runs, isLoading } = useQuery({
     queryKey: ["collection-history", user?.id],
     queryFn: () => getCollectionHistory(),
     enabled: !!user,
   });
+
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="paper-grain min-h-screen px-4 py-12">

@@ -101,10 +101,21 @@ function DraftPage() {
 
   const setStatus = useMutation({
     mutationFn: async (status: "aprovado" | "rejeitado" | "rascunho") => {
+      const textoLimpo = content.trim();
+      if (status !== "rejeitado") {
+        if (textoLimpo.length < 20) {
+          throw new Error(
+            "O texto do post deve ter pelo menos 20 caracteres antes de salvar ou aprovar.",
+          );
+        }
+        if (textoLimpo.length > 3000) {
+          throw new Error("O texto do post não pode ultrapassar 3.000 caracteres no LinkedIn.");
+        }
+      }
       const { error } = await supabase
         .from("post_drafts")
         .update({
-          content,
+          content: textoLimpo || content,
           status,
           approved_at: status === "aprovado" ? new Date().toISOString() : null,
         })
@@ -140,8 +151,9 @@ function DraftPage() {
     },
     onSuccess: async () => {
       setFeedback("");
-      setDirty(false);
       await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
+      await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
+      setDirty(false);
       toast.success("Nova versão gerada com o seu complemento.");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Algo deu errado."),
@@ -158,7 +170,7 @@ function DraftPage() {
       toast.error(error instanceof Error ? error.message : "Não foi possível publicar."),
   });
 
-  if (loading || draft.isLoading) {
+  if (loading || !session || draft.isLoading) {
     return (
       <main className="paper-grain flex min-h-screen items-center justify-center">
         <p className="text-sm text-muted-foreground">Carregando…</p>

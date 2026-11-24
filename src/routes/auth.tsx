@@ -118,10 +118,20 @@ function AuthPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <Button variant="outline" className="w-full" onClick={onGoogle} disabled={busy}>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={onGoogle}
+                disabled={busy || loading}
+              >
                 Google
               </Button>
-              <Button variant="outline" className="w-full" onClick={onGitHub} disabled={busy}>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={onGitHub}
+                disabled={busy || loading}
+              >
                 GitHub
               </Button>
             </div>
@@ -133,7 +143,12 @@ function AuthPage() {
               {mode === "criar" && (
                 <div className="space-y-1.5">
                   <Label htmlFor="name">Seu nome</Label>
-                  <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Input
+                    id="name"
+                    disabled={busy || loading}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                 </div>
               )}
               <div className="space-y-1.5">
@@ -142,6 +157,7 @@ function AuthPage() {
                   id="email"
                   type="email"
                   required
+                  disabled={busy || loading}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -153,11 +169,12 @@ function AuthPage() {
                   type="password"
                   required
                   minLength={6}
+                  disabled={busy || loading}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={busy}>
+              <Button type="submit" className="w-full" disabled={busy || loading}>
                 {busy ? "Carregando…" : mode === "entrar" ? "Entrar" : "Criar conta"}
               </Button>
             </form>

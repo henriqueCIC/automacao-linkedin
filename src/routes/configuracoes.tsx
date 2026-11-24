@@ -1,7 +1,8 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -44,9 +45,14 @@ export const Route = createFileRoute("/configuracoes")({
 type TomAutomacao = "profissional" | "narrativo" | "tecnico";
 
 function ConfiguracoesPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
   const [form, setForm] = useState({
     enabled: true,
     dailyTime: "18:00",
@@ -84,12 +90,23 @@ function ConfiguracoesPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Não foi possível salvar as configurações.");
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateMutation.mutate({ data: form });
   };
+
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="paper-grain min-h-screen px-4 py-12">
