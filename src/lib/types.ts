@@ -185,7 +185,7 @@ export interface RascunhoGeradoIA {
 /**
  * Estados possíveis de um rascunho de post no sistema.
  */
-export type StatusRascunho = "rascunho" | "aprovado" | "rejeitado" | "publicado";
+export type StatusRascunho = "rascunho" | "aprovado" | "publicando" | "rejeitado" | "publicado";
 
 /**
  * Modelo de dados completo de um rascunho de publicação.

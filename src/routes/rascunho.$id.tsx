@@ -46,7 +46,8 @@ export const Route = createFileRoute("/rascunho/$id")({
 
 const STATUS_LABEL: Record<string, string> = {
   rascunho: "Aguardando sua revisão",
-  aprovado: "Aprovado por você",
+  aprovado: "Aguardando envio (aprovado)",
+  publicando: "Em publicação / confirmar no LinkedIn",
   rejeitado: "Rejeitado",
   publicado: "Publicado no LinkedIn",
 };

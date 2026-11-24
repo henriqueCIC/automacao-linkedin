@@ -56,6 +56,7 @@ const TONES = [
 const STATUS_LABEL: Record<string, string> = {
   rascunho: "Aguardando revisão",
   aprovado: "Aprovado por você",
+  publicando: "Em publicação / reconciliação",
   rejeitado: "Rejeitado",
   publicado: "Publicado",
 };

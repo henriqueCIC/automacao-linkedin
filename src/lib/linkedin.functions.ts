@@ -1,9 +1,11 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { obterTokenLinkedInDoUsuario } from "./linkedin.server";
-
-const LINKEDIN_API_BASE = "https://api.linkedin.com";
+import {
+  LINKEDIN_API_BASE,
+  obterTokenLinkedInDoUsuario,
+  publicarRascunhoAprovadoNoLinkedIn,
+} from "./linkedin.server";
 
 /** Informa à interface se existe uma conta LinkedIn autorizada para publicação. */
 export const getLinkedInStatus = createServerFn({ method: "GET" })
@@ -79,70 +81,5 @@ export const publishApprovedDraft = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .validator(z.object({ draftId: z.string().trim().min(1) }))
   .handler(async ({ data, context }) => {
-    const { supabase, userId } = context;
-    const { data: draft, error } = await supabase
-      .from("post_drafts")
-      .select("id, content, status")
-      .eq("id", data.draftId)
-      .eq("user_id", userId)
-      .single();
-    if (error || !draft) throw new Error("Rascunho não encontrado.");
-    if (draft.status !== "aprovado") {
-      throw new Error("Só é possível publicar um post que você aprovou nesta tela.");
-    }
-
-    const token = await obterTokenLinkedInDoUsuario(userId);
-    if (!token) throw new Error("Nenhuma conta do LinkedIn autorizada para o seu usuário.");
-
-    const meRes = await fetch(`${LINKEDIN_API_BASE}/v2/userinfo`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!meRes.ok) {
-      console.error(`Falha ao consultar identidade no LinkedIn [HTTP ${meRes.status}]`);
-      throw new Error("A autorização do LinkedIn precisa ser renovada.");
-    }
-    const me = (await meRes.json()) as { sub?: string };
-    if (!me.sub) throw new Error("Não foi possível identificar a conta do LinkedIn.");
-
-    const postRes = await fetch(`${LINKEDIN_API_BASE}/v2/ugcPosts`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-        "X-Restli-Protocol-Version": "2.0.0",
-      },
-      body: JSON.stringify({
-        author: `urn:li:person:${me.sub}`,
-        lifecycleState: "PUBLISHED",
-        specificContent: {
-          "com.linkedin.ugc.ShareContent": {
-            shareCommentary: { text: draft.content },
-            shareMediaCategory: "NONE",
-          },
-        },
-        visibility: { "com.linkedin.ugc.MemberNetworkVisibility": "PUBLIC" },
-      }),
-    });
-
-    if (!postRes.ok) {
-      console.error(`Falha ao publicar no LinkedIn [HTTP ${postRes.status}]`);
-      throw new Error(`O LinkedIn recusou a publicação (${postRes.status}).`);
-    }
-
-    const published = (await postRes.json()) as { id?: string };
-    const { error: updateError } = await supabase
-      .from("post_drafts")
-      .update({
-        status: "publicado",
-        published_at: new Date().toISOString(),
-        linkedin_post_id: published.id ?? null,
-      })
-      .eq("id", draft.id)
-      .eq("user_id", userId);
-
-    if (updateError) {
-      throw new Error("O post foi enviado ao LinkedIn, mas falhou ao registrar o status local.");
-    }
-
-    return { ok: true, postId: published.id ?? null };
+    return publicarRascunhoAprovadoNoLinkedIn(context.supabase, context.userId, data.draftId);
   });

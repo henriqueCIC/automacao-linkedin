@@ -18,6 +18,7 @@ import {
   saveAccountLogin,
 } from "./appUserConnections.server";
 import { callAi } from "./ai.server";
+import { COLLECTION_STEPS } from "./collection-progress";
 import { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo } from "./commit-file-filter";
 import { construirPromptColetaCommits } from "./prompts";
 import { sanitizarSegredosEmTexto } from "./secret-sanitizer";
@@ -27,6 +28,11 @@ export { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo };
 
 /** Tipo utilitário do cliente Supabase tipado */
 type SupabaseAuth = SupabaseClient<Database>;
+
+const MAX_PAGINAS_REPOS = 3;
+const MAX_PAGINAS_COMMITS_POR_REPO = 3;
+const JANELA_BLOQUEIO_CONCORRENCIA_MS = 10 * 60 * 1000;
+const STATUS_COLETA_ATIVA = COLLECTION_STEPS.map((etapa) => etapa.status);
 
 /**
  * Executa chamadas autenticadas à API oficial do GitHub (api.github.com).
@@ -95,46 +101,68 @@ async function buscarLoginUsuario(idUsuario: string): Promise<string> {
 }
 
 /**
- * Consulta os repositórios aos quais o usuário tem acesso, ordenados pelos mais recentes.
- * @param idUsuario - UUID do usuário.
- * @returns Lista de repositórios com nome e data do último push.
+ * Consulta paginada dos repositórios aos quais o usuário tem acesso, ordenados pelos mais recentes (D02).
+ * Interrompe a paginação antecipadamente quando os repositórios restantes são anteriores a `dataInicialIso`.
  */
-async function buscarRepositoriosUsuario(idUsuario: string): Promise<RepositorioGitHub[]> {
-  const resposta = await chamarApiGitHub(idUsuario, "/user/repos?sort=pushed&per_page=100");
-  if (!resposta.ok) {
-    throw new Error(
-      "Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.",
-    );
-  }
-  const listaBruta = (await resposta.json()) as Array<{
-    full_name: string;
-    name: string;
-    owner?: { login?: string };
-    pushed_at?: string | null;
-    private?: boolean;
-  }>;
+async function buscarRepositoriosUsuario(
+  idUsuario: string,
+  dataInicialIso?: string,
+): Promise<RepositorioGitHub[]> {
+  const acumulado: RepositorioGitHub[] = [];
+  const limiteDataMs = dataInicialIso ? Date.parse(dataInicialIso) : Number.NaN;
 
-  return listaBruta.map((repo) => {
-    const [donoPadrao, nomePadrao] = repo.full_name.split("/");
-    return {
-      nomeCompleto: repo.full_name,
-      dono: repo.owner?.login ?? donoPadrao ?? "",
-      nome: repo.name ?? nomePadrao ?? "",
-      ultimoPushEm: repo.pushed_at ?? null,
-      privado: repo.private ?? false,
-    };
-  });
+  for (let pagina = 1; pagina <= MAX_PAGINAS_REPOS; pagina += 1) {
+    const resposta = await chamarApiGitHub(
+      idUsuario,
+      `/user/repos?sort=pushed&direction=desc&per_page=100&page=${pagina}`,
+    );
+    if (!resposta.ok) {
+      throw new Error(
+        "Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.",
+      );
+    }
+
+    const listaBruta = (await resposta.json()) as Array<{
+      full_name: string;
+      name: string;
+      owner?: { login?: string };
+      pushed_at?: string | null;
+      private?: boolean;
+    }>;
+
+    if (listaBruta.length === 0) break;
+
+    let encontrouAnteriorAoMarco = false;
+    for (const repo of listaBruta) {
+      const [donoPadrao, nomePadrao] = repo.full_name.split("/");
+      const ultimoPushEm = repo.pushed_at ?? null;
+
+      if (
+        ultimoPushEm &&
+        Number.isFinite(limiteDataMs) &&
+        Date.parse(ultimoPushEm) < limiteDataMs
+      ) {
+        encontrouAnteriorAoMarco = true;
+        continue;
+      }
+
+      acumulado.push({
+        nomeCompleto: repo.full_name,
+        dono: repo.owner?.login ?? donoPadrao ?? "",
+        nome: repo.name ?? nomePadrao ?? "",
+        ultimoPushEm,
+        privado: repo.private ?? false,
+      });
+    }
+
+    if (listaBruta.length < 100 || encontrouAnteriorAoMarco) break;
+  }
+
+  return acumulado;
 }
 
 /**
- * Busca commits realizados especificamente pelo usuário em um repositório dentro de uma janela temporal.
- *
- * @param idUsuario - UUID do usuário.
- * @param dono - Proprietário do repositório.
- * @param nomeRepo - Nome do repositório.
- * @param login - Login do GitHub para filtrar commits por autor.
- * @param dataInicialIso - Data ISO a partir da qual os commits serão considerados.
- * @returns Lista de commits brutos encontrados.
+ * Busca commits realizados pelo usuário em um repositório com paginação de segurança (D02).
  */
 async function buscarCommitsDoAutor(
   idUsuario: string,
@@ -143,55 +171,69 @@ async function buscarCommitsDoAutor(
   login: string,
   dataInicialIso?: string,
 ): Promise<CommitBrutoGitHub[]> {
-  const parametros = new URLSearchParams({ author: login, per_page: "100" });
-  if (dataInicialIso) {
-    parametros.set("since", dataInicialIso);
-  }
+  const acumulado: CommitBrutoGitHub[] = [];
 
-  const resposta = await chamarApiGitHub(
-    idUsuario,
-    `/repos/${dono}/${nomeRepo}/commits?${parametros.toString()}`,
-  );
+  for (let pagina = 1; pagina <= MAX_PAGINAS_COMMITS_POR_REPO; pagina += 1) {
+    const parametros = new URLSearchParams({
+      author: login,
+      per_page: "100",
+      page: String(pagina),
+    });
+    if (dataInicialIso) {
+      parametros.set("since", dataInicialIso);
+    }
 
-  // Repositório vazio ou sem histórico
-  if (resposta.status === 404 || resposta.status === 409) {
-    return [];
-  }
-  if (!resposta.ok) {
-    throw new Error(
-      `Não foi possível buscar os commits de ${dono}/${nomeRepo}. Verifique a autorização em Fontes ou tente novamente.`,
+    const resposta = await chamarApiGitHub(
+      idUsuario,
+      `/repos/${dono}/${nomeRepo}/commits?${parametros.toString()}`,
     );
+
+    // Repositório vazio ou sem histórico
+    if (resposta.status === 404 || resposta.status === 409) {
+      return [];
+    }
+    if (!resposta.ok) {
+      throw new Error(
+        `Não foi possível buscar os commits de ${dono}/${nomeRepo}. Verifique a autorização em Fontes ou tente novamente.`,
+      );
+    }
+
+    const payload = (await resposta.json()) as Array<{
+      sha: string;
+      html_url: string;
+      commit: {
+        message: string;
+        author?: {
+          name?: string;
+          email?: string;
+          date?: string;
+        };
+      };
+    }>;
+
+    for (const item of payload) {
+      acumulado.push({
+        sha: item.sha,
+        urlHtml: item.html_url,
+        dados: {
+          mensagem: item.commit.message,
+          ...(item.commit.author
+            ? {
+                autor: {
+                  nome: item.commit.author.name,
+                  email: item.commit.author.email,
+                  data: item.commit.author.date,
+                },
+              }
+            : {}),
+        },
+      });
+    }
+
+    if (payload.length < 100) break;
   }
 
-  const payload = (await resposta.json()) as Array<{
-    sha: string;
-    html_url: string;
-    commit: {
-      message: string;
-      author?: {
-        name?: string;
-        email?: string;
-        date?: string;
-      };
-    };
-  }>;
-
-  return payload.map((item) => ({
-    sha: item.sha,
-    urlHtml: item.html_url,
-    dados: {
-      mensagem: item.commit.message,
-      ...(item.commit.author
-        ? {
-            autor: {
-              nome: item.commit.author.name,
-              email: item.commit.author.email,
-              data: item.commit.author.date,
-            },
-          }
-        : {}),
-    },
-  }));
+  return acumulado;
 }
 
 /**
@@ -292,28 +334,52 @@ async function carregarHashesProcessados(
 }
 
 /**
- * Registra um commit no banco de dados como processado.
+ * Registra em lote os commits processados SOMENTE após a confirmação de day_entries e post_drafts (D01).
  */
-async function registrarCommitProcessado(
+async function registrarCommitsProcessadosEmLote(
   supabase: SupabaseAuth,
   idUsuario: string,
-  nomeCompletoRepo: string,
-  sha: string,
-  dataCommit?: string,
+  commits: ReadonlyArray<{ repo: string; sha: string; date?: string | undefined }>,
 ): Promise<void> {
-  const { error } = await supabase.from("seen_commits").upsert(
-    {
-      user_id: idUsuario,
-      repo_full_name: nomeCompletoRepo,
-      commit_sha: sha,
-      committed_at: dataCommit ? new Date(dataCommit).toISOString() : null,
-    },
-    { onConflict: "user_id,repo_full_name,commit_sha" },
-  );
+  if (commits.length === 0) return;
+
+  const registros = commits.map((commit) => ({
+    user_id: idUsuario,
+    repo_full_name: commit.repo,
+    commit_sha: commit.sha,
+    committed_at: commit.date ? new Date(commit.date).toISOString() : null,
+  }));
+
+  const { error } = await supabase
+    .from("seen_commits")
+    .upsert(registros, { onConflict: "user_id,repo_full_name,commit_sha" });
 
   if (error) {
-    console.error("Falha ao registrar commit processado:", error);
+    throw new Error("Não foi possível confirmar a marcação dos commits processados.");
   }
+}
+
+/**
+ * Verifica se já existe outra coleta ativa recente para o mesmo usuário, evitando execuções sobrepostas.
+ */
+async function existeColetaAtivaEmAndamento(
+  supabase: SupabaseAuth,
+  idUsuario: string,
+  runIdAtual: string,
+): Promise<boolean> {
+  const limiteRecenteIso = new Date(Date.now() - JANELA_BLOQUEIO_CONCORRENCIA_MS).toISOString();
+  const { data, error } = await supabase
+    .from("collection_runs")
+    .select("id")
+    .eq("user_id", idUsuario)
+    .neq("id", runIdAtual)
+    .in("status", [...STATUS_COLETA_ATIVA])
+    .gte("created_at", limiteRecenteIso)
+    .limit(1)
+    .maybeSingle();
+
+  if (error) return false;
+  return Boolean(data?.id);
 }
 
 /**
@@ -408,6 +474,17 @@ export async function collectForUser(
 }> {
   const inicioExecucao = new Date().toISOString();
   const runId = idExecucaoSolicitado ?? crypto.randomUUID();
+
+  // 0. Impede coletas concorrentes sobrepostas para o mesmo usuário
+  if (await existeColetaAtivaEmAndamento(supabaseAdmin, idUsuario, runId)) {
+    return {
+      runId,
+      status: "ignorado",
+      commitsFound: 0,
+      repositories: [],
+      message: "Já existe uma coleta em andamento para sua conta. Aguarde a conclusão.",
+    };
+  }
 
   // 1. Registra o início do ciclo de coleta no banco
   const { error: erroInicio } = await supabaseAdmin.from("collection_runs").insert({
@@ -509,20 +586,20 @@ export async function collectForUser(
       };
     }
 
-    // 5. Busca repositórios ativos do usuário
+    // 5. Busca repositórios ativos do usuário com paginação e filtro temporal (D02)
     await atualizarProgresso(
       "repositorios",
       `Conta conectada (@${loginUsuario}). Localizando repositórios ativos…`,
     );
-    const repositorios = await buscarRepositoriosUsuario(idUsuario);
+    const repositorios = await buscarRepositoriosUsuario(idUsuario, desdeQuando);
 
     await atualizarProgresso(
       "commits",
-      `${repositorios.length} repositório(s) encontrado(s). Varrendo commits recentes…`,
+      `${repositorios.length} repositório(s) elegível(is). Varrendo commits recentes…`,
     );
 
     const limiteMaximoCommits = configuracoes.max_commits_per_day ?? 15;
-    const commitsParaProcessar: Array<{
+    const todosCommitsNaoVistos: Array<{
       repo: string;
       sha: string;
       message: string;
@@ -530,13 +607,12 @@ export async function collectForUser(
       url: string;
     }> = [];
 
-    // Varrer até 50 repositórios mais recentes
-    for (const repo of repositorios.slice(0, 50)) {
+    for (const repo of repositorios.slice(0, 100)) {
       await atualizarProgresso(
         "commits",
         `Repositório: ${repo.nomeCompleto}. Buscando novos commits…`,
-        commitsParaProcessar.length,
-        [...new Set(commitsParaProcessar.map((c) => c.repo))],
+        todosCommitsNaoVistos.length,
+        [...new Set(todosCommitsNaoVistos.map((c) => c.repo))],
       );
 
       const commitsJaVistos = await carregarHashesProcessados(
@@ -555,26 +631,34 @@ export async function collectForUser(
         );
 
         for (const commit of commitsEncontrados) {
-          // Ignora commits que já foram registrados no banco
           if (commitsJaVistos.has(commit.sha)) continue;
 
-          commitsParaProcessar.push({
+          todosCommitsNaoVistos.push({
             repo: repo.nomeCompleto,
             sha: commit.sha,
             message: commit.dados.mensagem,
             url: commit.urlHtml,
             ...(commit.dados.autor?.data ? { date: commit.dados.autor.data } : {}),
           });
-
-          if (commitsParaProcessar.length >= limiteMaximoCommits) break;
         }
       } catch (erro) {
         console.error(`Erro ao consultar commits de ${repo.nomeCompleto}:`, erro);
         throw erro;
       }
-
-      if (commitsParaProcessar.length >= limiteMaximoCommits) break;
     }
+
+    // Ordena cronologicamente do mais antigo ao mais recente para preservar fila determinística (D02)
+    todosCommitsNaoVistos.sort((a, b) => {
+      const ta = a.date ? Date.parse(a.date) : 0;
+      const tb = b.date ? Date.parse(b.date) : 0;
+      return ta - tb;
+    });
+
+    const commitsParaProcessar = todosCommitsNaoVistos.slice(0, limiteMaximoCommits);
+    const commitsPendentes = Math.max(
+      0,
+      todosCommitsNaoVistos.length - commitsParaProcessar.length,
+    );
 
     // 6. Caso nenhum commit novo tenha sido feito na janela de tempo
     if (commitsParaProcessar.length === 0) {
@@ -606,9 +690,10 @@ export async function collectForUser(
       };
     }
 
-    // 7. Obtenção detalhada dos diffs com sanitização de ruídos
+    // 7. Obtenção detalhada dos diffs com sanitização de ruídos e segredos (sem marcar seen_commits antes da persistência - D01)
     const blocosDiffsTexto: string[] = [];
     const repositoriosComCommits = new Set<string>();
+    const commitsConfirmadosParaMarcar: Array<{ repo: string; sha: string; date?: string }> = [];
 
     for (const [indice, commit] of commitsParaProcessar.entries()) {
       await atualizarProgresso(
@@ -625,15 +710,7 @@ export async function collectForUser(
         const detalhes = await buscarDetalhesCommit(idUsuario, dono, nome, commit.sha);
         blocosDiffsTexto.push(montarTextoCommit(detalhes, commit.repo));
         repositoriosComCommits.add(commit.repo);
-
-        // Marca commit como visto para não reprocessar
-        await registrarCommitProcessado(
-          supabaseAdmin,
-          idUsuario,
-          commit.repo,
-          commit.sha,
-          commit.date,
-        );
+        commitsConfirmadosParaMarcar.push(commit);
       } catch (erro) {
         console.error(`Erro ao ler detalhes do commit ${commit.sha}:`, erro);
         throw erro;
@@ -733,8 +810,15 @@ export async function collectForUser(
 
     if (erroRascunho) throw erroRascunho;
 
-    // 10. Finaliza a rodada com sucesso
-    const mensagemSucesso = `Rascunho gerado com sucesso a partir de ${blocosDiffsTexto.length} commit(s).`;
+    // 10. Confirma os commits como vistos SOMENTE após salvar day_entries e post_drafts (D01)
+    await registrarCommitsProcessadosEmLote(supabaseAdmin, idUsuario, commitsConfirmadosParaMarcar);
+
+    // 11. Finaliza a rodada preservando a marca d'água 'desdeQuando' se ainda restarem excedentes (D02)
+    const untilAtSeguro = commitsPendentes > 0 ? desdeQuando : inicioExecucao;
+    const mensagemSucesso =
+      commitsPendentes > 0
+        ? `Rascunho gerado com sucesso a partir de ${blocosDiffsTexto.length} commit(s) (${commitsPendentes} restante(s) para a próxima coleta).`
+        : `Rascunho gerado com sucesso a partir de ${blocosDiffsTexto.length} commit(s).`;
 
     const { error: erroFinal } = await supabaseAdmin
       .from("collection_runs")
@@ -742,7 +826,7 @@ export async function collectForUser(
         user_id: idUsuario,
         trigger: gatilho,
         since_at: desdeQuando,
-        until_at: inicioExecucao,
+        until_at: untilAtSeguro,
         commits_found: blocosDiffsTexto.length,
         repositories: Array.from(repositoriosComCommits),
         day_entry_id: entradaDiaria.id,

@@ -47,11 +47,23 @@ function criarSupabaseMock(opcoes: OpcoesMockSupabase = {}) {
               eq() {
                 return this;
               },
+              neq() {
+                return this;
+              },
+              in() {
+                return this;
+              },
+              gte() {
+                return this;
+              },
               order() {
                 return this;
               },
               limit() {
                 return this;
+              },
+              maybeSingle() {
+                return Promise.resolve({ data: null, error: null });
               },
               single() {
                 return Promise.resolve({ data: null, error: { code: "PGRST116" } });
