@@ -11,6 +11,7 @@
  */
 
 import { z } from "zod";
+import { registrarEventoOperacional } from "./observability.server";
 
 /** Modelo padrão do Google Gemini conforme documentação oficial atual */
 export const MODELO_PADRAO_GEMINI = "gemini-3.8-flash";
@@ -375,22 +376,67 @@ export async function callAi(
 
   // 1. Provedor primário: Google Gemini (com fallback automático para OpenAI se configurada)
   if (geminiKey) {
+    const modeloGemini = process.env["GEMINI_MODEL"]?.trim() || MODELO_PADRAO_GEMINI;
+    const inicioGemini = Date.now();
     try {
-      return await chamarGemini(geminiKey, systemSeguro, userSeguro, timeoutMs);
+      const resposta = await chamarGemini(geminiKey, systemSeguro, userSeguro, timeoutMs);
+      registrarEventoOperacional({
+        evento: "chamada_ia_concluida",
+        provedorIA: "gemini",
+        modeloIA: modeloGemini,
+        latenciaIAMs: Date.now() - inicioGemini,
+        status: "ok",
+      });
+      return resposta;
     } catch (erroGemini) {
+      const motivoGemini =
+        erroGemini instanceof Error ? erroGemini.message : "Erro desconhecido no Gemini.";
+
       if (!openaiKey) {
+        registrarEventoOperacional({
+          evento: "chamada_ia_falhou",
+          provedorIA: "gemini",
+          modeloIA: modeloGemini,
+          latenciaIAMs: Date.now() - inicioGemini,
+          status: "erro",
+          mensagem: motivoGemini,
+        });
         throw erroGemini;
       }
 
-      const motivoGemini =
-        erroGemini instanceof Error ? erroGemini.message : "Erro desconhecido no Gemini.";
       console.warn(`Fallback de IA acionado (Gemini -> OpenAI): ${motivoGemini}`);
+      registrarEventoOperacional({
+        evento: "chamada_ia_fallback",
+        provedorIA: "gemini",
+        modeloIA: modeloGemini,
+        latenciaIAMs: Date.now() - inicioGemini,
+        status: "fallback",
+        mensagem: motivoGemini,
+      });
 
+      const modeloOpenAi = process.env["OPENAI_MODEL"]?.trim() || MODELO_PADRAO_OPENAI;
+      const inicioOpenAi = Date.now();
       try {
-        return await chamarOpenAi(openaiKey, systemSeguro, userSeguro, timeoutMs);
+        const respostaFallback = await chamarOpenAi(openaiKey, systemSeguro, userSeguro, timeoutMs);
+        registrarEventoOperacional({
+          evento: "chamada_ia_concluida",
+          provedorIA: "openai",
+          modeloIA: modeloOpenAi,
+          latenciaIAMs: Date.now() - inicioOpenAi,
+          status: "ok_fallback",
+        });
+        return respostaFallback;
       } catch (erroOpenAi) {
         const motivoOpenAi =
           erroOpenAi instanceof Error ? erroOpenAi.message : "Erro desconhecido na OpenAI.";
+        registrarEventoOperacional({
+          evento: "chamada_ia_falhou",
+          provedorIA: "openai",
+          modeloIA: modeloOpenAi,
+          latenciaIAMs: Date.now() - inicioOpenAi,
+          status: "erro",
+          mensagem: motivoOpenAi,
+        });
         throw new ErroCamadaIA(
           "TODOS_PROVEDORES_FALHARAM",
           `Falha nos dois provedores de IA. Gemini: ${motivoGemini} | OpenAI: ${motivoOpenAi}`,
@@ -400,5 +446,15 @@ export async function callAi(
   }
 
   // 2. Provedor alternativo direto quando apenas OpenAI está configurada
-  return chamarOpenAi(openaiKey!, systemSeguro, userSeguro, timeoutMs);
+  const modeloOpenAi = process.env["OPENAI_MODEL"]?.trim() || MODELO_PADRAO_OPENAI;
+  const inicioOpenAi = Date.now();
+  const resposta = await chamarOpenAi(openaiKey!, systemSeguro, userSeguro, timeoutMs);
+  registrarEventoOperacional({
+    evento: "chamada_ia_concluida",
+    provedorIA: "openai",
+    modeloIA: modeloOpenAi,
+    latenciaIAMs: Date.now() - inicioOpenAi,
+    status: "ok",
+  });
+  return resposta;
 }

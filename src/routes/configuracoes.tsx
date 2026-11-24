@@ -16,16 +16,10 @@ import {
 } from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { getAutomationSettings, updateAutomationSettings } from "@/lib/collect.functions";
+import { FUSOS_HORARIOS_SUPORTADOS, normalizarFusoHorario } from "@/lib/timezone";
 import { useAuth } from "@/hooks/useAuth";
 
-const TIMEZONES = [
-  "America/Bahia",
-  "America/Sao_Paulo",
-  "America/Rio_de_Janeiro",
-  "America/Fortaleza",
-  "America/Manaus",
-  "America/Recife",
-];
+const TIMEZONES = FUSOS_HORARIOS_SUPORTADOS;
 
 export const Route = createFileRoute("/configuracoes")({
   head: () => ({
@@ -74,7 +68,7 @@ function ConfiguracoesPage() {
     setForm({
       enabled: settings.enabled,
       dailyTime: settings.daily_time.slice(0, 5),
-      timezone: settings.timezone,
+      timezone: normalizarFusoHorario(settings.timezone),
       defaultTone: settings.default_tone as TomAutomacao,
       maxCommitsPerDay: settings.max_commits_per_day,
       notifyDesktop: settings.notify_desktop,

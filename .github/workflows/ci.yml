@@ -1,0 +1,48 @@
+name: CI — Qualidade, Testes e Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verificacao:
+    name: Lint, Typecheck, Testes e Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CI: "true"
+      VITE_SUPABASE_URL: "https://ci-isolado.supabase.co"
+      VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_isolado"
+      SUPABASE_URL: "https://ci-isolado.supabase.co"
+      SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_isolado"
+      ENCRYPTION_SECRET: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências travadas
+        run: npm ci
+
+      - name: Verificar ESLint e Prettier
+        run: npm run lint
+
+      - name: Verificar tipagem estrita TypeScript
+        run: npm run typecheck
+
+      - name: Executar suíte unitária e de integração (Vitest)
+        run: npm test
+
+      - name: Compilar cliente e servidor de produção
+        run: npm run build

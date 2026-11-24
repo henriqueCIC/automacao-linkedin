@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { collectForUser } from "./collect.server";
+import { ehFusoHorarioValido, normalizarFusoHorario } from "./timezone";
 
 export const getGitHubCollectionStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -76,15 +77,23 @@ export const getAutomationSettings = createServerFn({ method: "GET" })
       if (insertError) throw new Error(insertError.message);
       return created;
     }
-    if (error)
+    if (error) {
       throw new Error((error as { message?: string }).message ?? "Erro ao carregar configurações");
-    return data;
+    }
+    return {
+      ...data,
+      timezone: normalizarFusoHorario(data.timezone),
+    };
   });
 
 const updateSettingsSchema = z.object({
   enabled: z.boolean(),
-  dailyTime: z.string().regex(/^\d{2}:\d{2}$/),
-  timezone: z.string().min(1),
+  dailyTime: z.string().regex(/^\d{2}:\d{2}$/, "Informe o horário no formato HH:MM."),
+  timezone: z
+    .string()
+    .trim()
+    .min(1)
+    .refine(ehFusoHorarioValido, "Fuso horário inválido. Selecione um fuso IANA suportado."),
   defaultTone: z.enum(["profissional", "narrativo", "tecnico"]),
   maxCommitsPerDay: z.number().int().min(1).max(100),
   notifyDesktop: z.boolean(),

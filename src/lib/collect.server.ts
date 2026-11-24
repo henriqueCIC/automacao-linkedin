@@ -20,8 +20,10 @@ import {
 import { callAi } from "./ai.server";
 import { COLLECTION_STEPS } from "./collection-progress";
 import { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo } from "./commit-file-filter";
+import { executarComBackoff, registrarEventoOperacional } from "./observability.server";
 import { construirPromptColetaCommits } from "./prompts";
 import { sanitizarSegredosEmTexto } from "./secret-sanitizer";
+import { calcularJanela24HorasAtras, partesDataHoraNoFuso } from "./timezone";
 import type { RepositorioGitHub, CommitBrutoGitHub, OrigemGatilhoColeta } from "./types";
 
 export { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo };
@@ -65,10 +67,31 @@ async function chamarApiGitHub(
     ? caminhoOuUrl
     : `https://api.github.com${caminhoOuUrl}`;
 
-  const resposta = await fetch(urlFinal, {
-    ...init,
-    headers: cabecalhos,
-  });
+  const metodo = (init?.method ?? "GET").toUpperCase();
+  const ehIdempotente = metodo === "GET" || metodo === "HEAD";
+
+  const { resultado: resposta } = await executarComBackoff(
+    async () => {
+      const res = await fetch(urlFinal, {
+        ...init,
+        headers: cabecalhos,
+      });
+      if (ehIdempotente && (res.status === 502 || res.status === 503 || res.status === 504)) {
+        const erroTransitorio = new Error(`GitHub temporariamente indisponível (${res.status}).`);
+        (erroTransitorio as Error & { transitorio: boolean }).transitorio = true;
+        throw erroTransitorio;
+      }
+      return res;
+    },
+    {
+      maxTentativas: ehIdempotente ? 2 : 1,
+      atrasoBaseMs: 25,
+      deveRepetir: (erro) =>
+        ehIdempotente &&
+        (erro instanceof TypeError ||
+          Boolean((erro as { transitorio?: boolean } | null)?.transitorio)),
+    },
+  );
 
   // Tratamento de token revogado ou expirado no GitHub
   if (resposta.status === 401) {
@@ -439,14 +462,10 @@ async function buscarDataUltimaColetaComSucesso(
 }
 
 /**
- * Calcula a data inicial padrão de busca caso seja a primeira execução do usuário (últimas 24 horas).
+ * Calcula a data inicial padrão de busca caso seja a primeira execução do usuário (últimas 24 horas UTC).
  */
-function calcularDataInicialPadrao(fusoHorario = "America/Bahia"): string {
-  const agora = new Date();
-  const deslocamento = fusoHorario === "America/Bahia" ? -3 * 60 : agora.getTimezoneOffset();
-  const horaLocal = new Date(agora.getTime() - deslocamento * 60 * 1000);
-  horaLocal.setHours(horaLocal.getHours() - 24);
-  return horaLocal.toISOString();
+function calcularDataInicialPadrao(): string {
+  return calcularJanela24HorasAtras();
 }
 
 /**
@@ -472,11 +491,20 @@ export async function collectForUser(
   postDraftId?: string;
   message?: string;
 }> {
-  const inicioExecucao = new Date().toISOString();
+  const inicioMs = Date.now();
+  const inicioExecucao = new Date(inicioMs).toISOString();
   const runId = idExecucaoSolicitado ?? crypto.randomUUID();
 
   // 0. Impede coletas concorrentes sobrepostas para o mesmo usuário
   if (await existeColetaAtivaEmAndamento(supabaseAdmin, idUsuario, runId)) {
+    registrarEventoOperacional({
+      evento: "coleta_ignorada",
+      runId,
+      userId: idUsuario,
+      gatilho,
+      status: "ignorado",
+      mensagem: "Coleta concorrente bloqueada.",
+    });
     return {
       runId,
       status: "ignorado",
@@ -485,6 +513,14 @@ export async function collectForUser(
       message: "Já existe uma coleta em andamento para sua conta. Aguarde a conclusão.",
     };
   }
+
+  registrarEventoOperacional({
+    evento: "coleta_iniciada",
+    runId,
+    userId: idUsuario,
+    gatilho,
+    status: "autenticando",
+  });
 
   // 1. Registra o início do ciclo de coleta no banco
   const { error: erroInicio } = await supabaseAdmin.from("collection_runs").insert({
@@ -539,7 +575,7 @@ export async function collectForUser(
     // 3. Define a janela de tempo da busca (desde a última coleta com sucesso)
     const desdeQuando =
       (await buscarDataUltimaColetaComSucesso(supabaseAdmin, idUsuario)) ??
-      calcularDataInicialPadrao(configuracoes.timezone);
+      calcularDataInicialPadrao();
 
     const { error: erroSince } = await supabaseAdmin
       .from("collection_runs")
@@ -780,7 +816,7 @@ export async function collectForUser(
       [...repositoriosComCommits],
     );
 
-    const dataHoje = new Date().toISOString().slice(0, 10);
+    const dataHoje = partesDataHoraNoFuso(configuracoes.timezone).data;
 
     const { data: entradaDiaria, error: erroEntrada } = await supabaseAdmin
       .from("day_entries")
@@ -841,6 +877,19 @@ export async function collectForUser(
       throw new Error("Não foi possível salvar o resultado da coleta.");
     }
 
+    registrarEventoOperacional({
+      evento: "coleta_concluida",
+      runId,
+      userId: idUsuario,
+      gatilho,
+      status: "ok",
+      duracaoMs: Date.now() - inicioMs,
+      commitsEncontrados: blocosDiffsTexto.length,
+      repositoriosCount: repositoriosComCommits.size,
+      commitsPendentes,
+      mensagem: mensagemSucesso,
+    });
+
     return {
       runId,
       status: "ok",
@@ -853,6 +902,16 @@ export async function collectForUser(
   } catch (erro) {
     const mensagemErroGeral =
       erro instanceof Error ? erro.message : "Não foi possível concluir o ciclo de coleta.";
+
+    registrarEventoOperacional({
+      evento: "coleta_falhou",
+      runId,
+      userId: idUsuario,
+      gatilho,
+      status: "erro",
+      duracaoMs: Date.now() - inicioMs,
+      mensagem: mensagemErroGeral,
+    });
 
     const { error: erroRegistroCatch } = await supabaseAdmin
       .from("collection_runs")
