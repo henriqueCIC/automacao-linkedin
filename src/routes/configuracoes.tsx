@@ -7,7 +7,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { getAutomationSettings, updateAutomationSettings } from "@/lib/collect.functions";
 import { useAuth } from "@/hooks/useAuth";
@@ -25,15 +31,23 @@ export const Route = createFileRoute("/configuracoes")({
   head: () => ({
     meta: [
       { title: "Configurações da automação" },
-      { name: "description", content: "Configure horário, fuso e estilo da coleta automática de commits." },
+      {
+        name: "description",
+        content: "Configure horário, fuso e estilo da coleta automática de commits.",
+      },
       { property: "og:title", content: "Configurações da automação" },
-      { property: "og:description", content: "Configure horário, fuso e estilo da coleta automática de commits." },
+      {
+        property: "og:description",
+        content: "Configure horário, fuso e estilo da coleta automática de commits.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   component: ConfiguracoesPage,
 });
+
+type TomAutomacao = "profissional" | "narrativo" | "tecnico";
 
 function ConfiguracoesPage() {
   const { user } = useAuth();
@@ -43,7 +57,7 @@ function ConfiguracoesPage() {
     enabled: true,
     dailyTime: "18:00",
     timezone: "America/Bahia",
-    defaultTone: "profissional" as const,
+    defaultTone: "profissional" as TomAutomacao,
     maxCommitsPerDay: 15,
     notifyDesktop: true,
     notifyEmail: false,
@@ -61,7 +75,7 @@ function ConfiguracoesPage() {
       enabled: settings.enabled,
       dailyTime: settings.daily_time.slice(0, 5),
       timezone: settings.timezone,
-      defaultTone: settings.default_tone as typeof form.defaultTone,
+      defaultTone: settings.default_tone as TomAutomacao,
       maxCommitsPerDay: settings.max_commits_per_day,
       notifyDesktop: settings.notify_desktop,
       notifyEmail: settings.notify_email,
@@ -99,13 +113,17 @@ function ConfiguracoesPage() {
         {saved && (
           <Alert className="border-border bg-card">
             <AlertTitle className="text-foreground">Salvo</AlertTitle>
-            <AlertDescription className="text-muted-foreground">As configurações foram atualizadas.</AlertDescription>
+            <AlertDescription className="text-muted-foreground">
+              As configurações foram atualizadas.
+            </AlertDescription>
           </Alert>
         )}
 
         <Card className="border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="font-display text-xl text-foreground">Coleta automática</CardTitle>
+            <CardTitle className="font-display text-xl text-foreground">
+              Coleta automática
+            </CardTitle>
             <CardDescription className="text-muted-foreground">
               Uma vez por dia o app consulta seus commits mais recentes do GitHub e gera um
               rascunho. A publicação no LinkedIn só acontece depois da sua revisão e confirmação.
@@ -119,7 +137,9 @@ function ConfiguracoesPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="enabled">Ativada</Label>
-                    <p className="text-sm text-muted-foreground">Pausa e retoma a coleta automática.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Pausa e retoma a coleta automática.
+                    </p>
                   </div>
                   <Switch
                     id="enabled"
@@ -164,7 +184,7 @@ function ConfiguracoesPage() {
                   <Select
                     value={form.defaultTone}
                     onValueChange={(v) =>
-                      setForm((f) => ({ ...f, defaultTone: v as typeof form.defaultTone }))
+                      setForm((f) => ({ ...f, defaultTone: v as TomAutomacao }))
                     }
                   >
                     <SelectTrigger id="defaultTone" className="bg-background">
@@ -210,7 +230,9 @@ function ConfiguracoesPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="notifyEmail">Lembrete por e-mail</Label>
-                    <p className="text-sm text-muted-foreground">Envia um aviso quando o rascunho ficar pronto.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Envia um aviso quando o rascunho ficar pronto.
+                    </p>
                   </div>
                   <Switch
                     id="notifyEmail"
@@ -230,7 +252,6 @@ function ConfiguracoesPage() {
             )}
           </CardContent>
         </Card>
-
       </div>
     </main>
   );

@@ -24,10 +24,10 @@ export const Route = createFileRoute("/api/public/coletar")({
 
         if (settingsError) {
           console.error("Cron: failed to load automation settings", settingsError);
-          return new Response(
-            JSON.stringify({ success: false, error: settingsError.message }),
-            { status: 500, headers: { "Content-Type": "application/json" } },
-          );
+          return new Response(JSON.stringify({ success: false, error: settingsError.message }), {
+            status: 500,
+            headers: { "Content-Type": "application/json" },
+          });
         }
 
         const results: Array<{
@@ -40,7 +40,11 @@ export const Route = createFileRoute("/api/public/coletar")({
 
         for (const settings of settingsRows ?? []) {
           if (!shouldRunNow(settings.daily_time, settings.timezone, settings.last_run_date)) {
-            results.push({ userId: settings.user_id, status: "ignorado", message: "fora do horário" });
+            results.push({
+              userId: settings.user_id,
+              status: "ignorado",
+              message: "fora do horário",
+            });
             continue;
           }
 

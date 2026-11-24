@@ -36,7 +36,9 @@ export const startGitHubOAuth = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { clientId } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
-    const state = Buffer.from(JSON.stringify({ userId: context.userId, ts: Date.now() })).toString("base64");
+    const state = Buffer.from(JSON.stringify({ userId: context.userId, ts: Date.now() })).toString(
+      "base64",
+    );
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: returnUrl,
@@ -75,9 +77,15 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
       throw new Error("Falha ao trocar código de autorização com o GitHub.");
     }
 
-    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string; error_description?: string };
+    const tokenData = (await tokenRes.json()) as {
+      access_token?: string;
+      error?: string;
+      error_description?: string;
+    };
     if (tokenData.error || !tokenData.access_token) {
-      throw new Error(tokenData.error_description || tokenData.error || "Token do GitHub não retornado.");
+      throw new Error(
+        tokenData.error_description || tokenData.error || "Token do GitHub não retornado.",
+      );
     }
 
     // Busca o login do usuário no GitHub
@@ -98,7 +106,12 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
       console.warn("Não foi possível consultar o login do usuário:", e);
     }
 
-    await saveConnectionKeyForUser(context.userId, GITHUB_CONNECTOR_ID, tokenData.access_token, accountLogin);
+    await saveConnectionKeyForUser(
+      context.userId,
+      GITHUB_CONNECTOR_ID,
+      tokenData.access_token,
+      accountLogin,
+    );
     return { ok: true };
   });
 

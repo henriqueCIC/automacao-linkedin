@@ -38,7 +38,9 @@ export const getCollectionHistory = createServerFn({ method: "GET" })
     const { supabase, userId } = context;
     const { data, error } = await supabase
       .from("collection_runs")
-      .select("id, created_at, trigger, status, commits_found, repositories, message, post_draft_id")
+      .select(
+        "id, created_at, trigger, status, commits_found, repositories, message, post_draft_id",
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -74,7 +76,8 @@ export const getAutomationSettings = createServerFn({ method: "GET" })
       if (insertError) throw new Error(insertError.message);
       return created;
     }
-    if (error) throw new Error((error as { message?: string }).message ?? "Erro ao carregar configurações");
+    if (error)
+      throw new Error((error as { message?: string }).message ?? "Erro ao carregar configurações");
     return data;
   });
 
@@ -93,21 +96,19 @@ export const updateAutomationSettings = createServerFn({ method: "POST" })
   .validator(updateSettingsSchema)
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { error } = await supabase
-      .from("automation_settings")
-      .upsert(
-        {
-          user_id: userId,
-          enabled: data.enabled,
-          daily_time: data.dailyTime,
-          timezone: data.timezone,
-          default_tone: data.defaultTone,
-          max_commits_per_day: data.maxCommitsPerDay,
-          notify_desktop: data.notifyDesktop,
-          notify_email: data.notifyEmail,
-        },
-        { onConflict: "user_id" },
-      );
+    const { error } = await supabase.from("automation_settings").upsert(
+      {
+        user_id: userId,
+        enabled: data.enabled,
+        daily_time: data.dailyTime,
+        timezone: data.timezone,
+        default_tone: data.defaultTone,
+        max_commits_per_day: data.maxCommitsPerDay,
+        notify_desktop: data.notifyDesktop,
+        notify_email: data.notifyEmail,
+      },
+      { onConflict: "user_id" },
+    );
     if (error) throw new Error(error.message);
     return { ok: true };
   });

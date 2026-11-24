@@ -80,13 +80,13 @@ function Home() {
     );
   }
 
-  const metadataName = session.user.user_metadata?.["full_name"] ?? session.user.user_metadata?.["name"];
+  const metadataName =
+    session.user.user_metadata?.["full_name"] ?? session.user.user_metadata?.["name"];
   const emailName = (session.user.email?.split("@")[0] ?? "Usuário")
     .replace(/[._-]+/g, " ")
     .replace(/\b\p{L}/gu, (letter) => letter.toLocaleUpperCase("pt-BR"));
-  const displayName = typeof metadataName === "string" && metadataName.trim()
-    ? metadataName.trim()
-    : emailName;
+  const displayName =
+    typeof metadataName === "string" && metadataName.trim() ? metadataName.trim() : emailName;
   return <Dashboard userId={session.user.id} displayName={displayName} />;
 }
 
@@ -136,7 +136,12 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
   const collectNow = useMutation({
     mutationFn: (runId: string) => runCollect({ data: { runId } }),
     onSuccess: async (result) => {
-      setCollectionResult({ status: result.status, message: result.message ?? null, commits_found: result.commitsFound, repositories: result.repositories });
+      setCollectionResult({
+        status: result.status,
+        message: result.message ?? null,
+        commits_found: result.commitsFound,
+        repositories: result.repositories,
+      });
       await queryClient.invalidateQueries({ queryKey: ["collection-status", userId] });
       await queryClient.invalidateQueries({ queryKey: ["day_entries", userId] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts", userId] });
@@ -147,7 +152,11 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
         toast.success("Coleta concluída. Um novo rascunho foi gerado.");
         void navigate({ to: "/rascunho/$id", params: { id: result.postDraftId } });
       } else {
-        toast(result.commitsFound === 0 ? "Nenhum commit novo encontrado." : "Coleta concluída sem rascunho.");
+        toast(
+          result.commitsFound === 0
+            ? "Nenhum commit novo encontrado."
+            : "Coleta concluída sem rascunho.",
+        );
       }
     },
     onError: (error) => {
@@ -162,9 +171,12 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
     enabled: !!collectionRunId && collectNow.isPending,
     queryFn: async () => {
       if (!collectionRunId) return null;
-      const { data, error } = await supabase.from("collection_runs")
+      const { data, error } = await supabase
+        .from("collection_runs")
         .select("status, message, commits_found, repositories")
-        .eq("user_id", userId).eq("id", collectionRunId).maybeSingle();
+        .eq("user_id", userId)
+        .eq("id", collectionRunId)
+        .maybeSingle();
       if (error) throw error;
       return data;
     },
@@ -206,8 +218,12 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
       <header className="border-b border-border bg-background">
         <div className="mx-auto flex max-w-6xl flex-col gap-4 px-6 py-6 lg:flex-row lg:items-center lg:justify-between">
           <div className="min-w-0">
-            <p className="font-display text-3xl text-foreground">Diário <span className="text-primary">→</span> LinkedIn</p>
-            <p className="mt-1 break-words text-sm text-muted-foreground">Bem-vindo: <span className="font-medium text-foreground">{displayName}</span></p>
+            <p className="font-display text-3xl text-foreground">
+              Diário <span className="text-primary">→</span> LinkedIn
+            </p>
+            <p className="mt-1 break-words text-sm text-muted-foreground">
+              Bem-vindo: <span className="font-medium text-foreground">{displayName}</span>
+            </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <Button asChild variant="outline" size="sm">
@@ -223,17 +239,17 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
               <Link to="/publicacoes">Publicações</Link>
             </Button>
             <div className="ml-1 flex shrink-0 items-center gap-1 border-l border-border pl-2">
-            <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={async () => {
-                await supabase.auth.signOut();
-                void navigate({ to: "/auth" });
-              }}
-            >
-              Sair
-            </Button>
+              <ThemeToggle />
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={async () => {
+                  await supabase.auth.signOut();
+                  void navigate({ to: "/auth" });
+                }}
+              >
+                Sair
+              </Button>
             </div>
           </div>
         </div>
@@ -244,8 +260,8 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
           <CardHeader>
             <CardTitle className="font-display text-3xl">O que mudou hoje?</CardTitle>
             <CardDescription>
-              Escreva em tópicos soltos, importe um arquivo ou busque seus commits do GitHub. Nada
-              é publicado sem a sua aprovação.
+              Escreva em tópicos soltos, importe um arquivo ou busque seus commits do GitHub. Nada é
+              publicado sem a sua aprovação.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -258,13 +274,13 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
                   "pt-BR",
                 )}
                 {" — "}
-                 {isCollectionRunning(collectionStatus.data.lastRun.status)
-                   ? "coleta em andamento"
-                   : collectionStatus.data.lastRun.status === "erro"
-                   ? "coleta não concluída"
-                   : collectionStatus.data.lastRun.commits_found === 0
-                  ? "nenhum commit novo"
-                  : `${collectionStatus.data.lastRun.commits_found} commits achados`}
+                {isCollectionRunning(collectionStatus.data.lastRun.status)
+                  ? "coleta em andamento"
+                  : collectionStatus.data.lastRun.status === "erro"
+                    ? "coleta não concluída"
+                    : collectionStatus.data.lastRun.commits_found === 0
+                      ? "nenhum commit novo"
+                      : `${collectionStatus.data.lastRun.commits_found} commits achados`}
                 {collectionStatus.data.lastRun.status !== "ok" &&
                   ` (${collectionStatus.data.lastRun.message ?? "erro"})`}
               </div>
@@ -290,8 +306,16 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
             </Button>
             {collectionRunId && (
               <>
-                <CollectionProgress run={collectionResult ?? collectionProgress.data ?? null} pending={collectNow.isPending} failed={collectNow.isError} />
-                {collectionProgress.isError && collectNow.isPending && <p role="status" className="text-xs text-warning">Não foi possível atualizar as etapas. Aguardando o resultado da busca…</p>}
+                <CollectionProgress
+                  run={collectionResult ?? collectionProgress.data ?? null}
+                  pending={collectNow.isPending}
+                  failed={collectNow.isError}
+                />
+                {collectionProgress.isError && collectNow.isPending && (
+                  <p role="status" className="text-xs text-warning">
+                    Não foi possível atualizar as etapas. Aguardando o resultado da busca…
+                  </p>
+                )}
               </>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
@@ -325,7 +349,9 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
               <Textarea
                 id="notes"
                 rows={10}
-                placeholder={"- ajustei o fluxo de cadastro\n- reunião com o time de vendas\n- aprendi X sobre Y"}
+                placeholder={
+                  "- ajustei o fluxo de cadastro\n- reunião com o time de vendas\n- aprendi X sobre Y"
+                }
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
               />
@@ -404,7 +430,9 @@ function Dashboard({ userId, displayName }: { userId: string; displayName: strin
                   <p className="text-xs font-medium text-primary">
                     {new Date(`${entry.entry_date}T12:00:00`).toLocaleDateString("pt-BR")}
                   </p>
-                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">{entry.raw_notes}</p>
+                  <p className="mt-1 line-clamp-2 text-sm text-muted-foreground">
+                    {entry.raw_notes}
+                  </p>
                 </div>
               ))}
             </CardContent>

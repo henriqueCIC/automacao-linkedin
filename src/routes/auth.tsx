@@ -126,7 +126,8 @@ function AuthPage() {
               </Button>
             </div>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" /> ou com e-mail <span className="h-px flex-1 bg-border" />
+              <span className="h-px flex-1 bg-border" /> ou com e-mail{" "}
+              <span className="h-px flex-1 bg-border" />
             </div>
             <form onSubmit={onSubmit} className="space-y-4">
               {mode === "criar" && (
@@ -166,7 +167,9 @@ function AuthPage() {
                 className="text-primary hover:underline"
                 onClick={() => setMode(mode === "entrar" ? "criar" : "entrar")}
               >
-                {mode === "entrar" ? "Não tem uma conta? Crie agora" : "Já tem uma conta? Faça login"}
+                {mode === "entrar"
+                  ? "Não tem uma conta? Crie agora"
+                  : "Já tem uma conta? Faça login"}
               </button>
             </div>
           </CardContent>

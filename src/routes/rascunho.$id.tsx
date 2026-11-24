@@ -75,7 +75,9 @@ function DraftPage() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("post_drafts")
-        .select("id, summary, content, status, tone, feedback, published_at, day_entries(entry_date, raw_notes)")
+        .select(
+          "id, summary, content, status, tone, feedback, published_at, day_entries(entry_date, raw_notes)",
+        )
         .eq("id", id)
         .single();
       if (error) throw new Error(error.message);
@@ -255,7 +257,10 @@ function DraftPage() {
                   >
                     Salvar alterações
                   </Button>
-                  <Button onClick={() => setStatus.mutate("aprovado")} disabled={setStatus.isPending}>
+                  <Button
+                    onClick={() => setStatus.mutate("aprovado")}
+                    disabled={setStatus.isPending}
+                  >
                     {approved ? "Aprovar novamente" : "Aprovar este texto"}
                   </Button>
                   <Button

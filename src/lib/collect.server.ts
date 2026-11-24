@@ -100,7 +100,9 @@ async function buscarLoginUsuario(idUsuario: string): Promise<string> {
 async function buscarRepositoriosUsuario(idUsuario: string): Promise<RepositorioGitHub[]> {
   const resposta = await chamarApiGitHub(idUsuario, "/user/repos?sort=pushed&per_page=100");
   if (!resposta.ok) {
-    throw new Error("Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.");
+    throw new Error(
+      "Não foi possível consultar os repositórios no GitHub. Tente novamente em instantes.",
+    );
   }
   const listaBruta = (await resposta.json()) as Array<{
     full_name: string;
@@ -367,8 +369,7 @@ async function buscarDataUltimaColetaComSucesso(
  */
 function calcularDataInicialPadrao(fusoHorario = "America/Bahia"): string {
   const agora = new Date();
-  const deslocamento =
-    fusoHorario === "America/Bahia" ? -3 * 60 : agora.getTimezoneOffset();
+  const deslocamento = fusoHorario === "America/Bahia" ? -3 * 60 : agora.getTimezoneOffset();
   const horaLocal = new Date(agora.getTime() - deslocamento * 60 * 1000);
   horaLocal.setHours(horaLocal.getHours() - 24);
   return horaLocal.toISOString();

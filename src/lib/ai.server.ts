@@ -43,7 +43,8 @@ export async function callAi(system: string, user: string): Promise<AiDraft> {
     if (!res.ok) {
       const body = await res.text();
       console.error(`Erro na API do Gemini [${res.status}]: ${body}`);
-      if (res.status === 429) throw new Error("Limite de requisições da IA atingido. Tente em instantes.");
+      if (res.status === 429)
+        throw new Error("Limite de requisições da IA atingido. Tente em instantes.");
       throw new Error(`Falha na API do Gemini (${res.status}). Verifique a GEMINI_API_KEY.`);
     }
 
@@ -97,7 +98,8 @@ export async function callAi(system: string, user: string): Promise<AiDraft> {
   if (!res.ok) {
     const body = await res.text();
     console.error(`Erro na API da OpenAI [${res.status}]: ${body}`);
-    if (res.status === 429) throw new Error("Muitos pedidos em sequência. Tente de novo em instantes.");
+    if (res.status === 429)
+      throw new Error("Muitos pedidos em sequência. Tente de novo em instantes.");
     throw new Error(`Falha na API da OpenAI (${res.status}).`);
   }
 

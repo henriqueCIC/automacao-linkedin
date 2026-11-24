@@ -78,7 +78,7 @@ export const refineDraft = createServerFn({ method: "POST" })
     const revised = await callAi(
       SYSTEM,
       [
-        `Tom desejado: ${TONES[draft.tone as string] ?? TONES["profissional"] }`,
+        `Tom desejado: ${TONES[draft.tone as string] ?? TONES["profissional"]}`,
         "Anotações originais do dia:",
         notes,
         "",
