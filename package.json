@@ -9,7 +9,10 @@
     "build:dev": "vite build --mode development",
     "preview": "vite preview",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "typecheck": "tsc --noEmit --incremental false",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "overrides": {
     "rolldown": "1.2.1"
@@ -85,7 +88,8 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "8.1.5"
+    "vite": "8.1.5",
+    "vitest": "4.1.12"
   },
   "version": "0.1.0"
 }

@@ -18,136 +18,13 @@ import {
   saveAccountLogin,
 } from "./appUserConnections.server";
 import { callAi } from "./ai.server";
-import type {
-  RepositorioGitHub,
-  CommitBrutoGitHub,
-  CommitSanitizado,
-  FiltroArquivo,
-  OrigemGatilhoColeta,
-} from "./types";
+import { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo } from "./commit-file-filter";
+import type { RepositorioGitHub, CommitBrutoGitHub, OrigemGatilhoColeta } from "./types";
+
+export { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo };
 
 /** Tipo utilitário do cliente Supabase tipado */
 type SupabaseAuth = SupabaseClient<Database>;
-
-/**
- * Catálogo documentado de regras de filtro anti-ruído.
- * Cada regra define a expressão regular, a categoria do artefato e a justificativa
- * técnica pela qual o arquivo é descartado antes do envio ao modelo de IA.
- */
-export const REGRAS_FILTRO_ANTI_RUIDO: readonly FiltroArquivo[] = [
-  // 1. Lockfiles (árvores de dependências geradas por ferramentas)
-  {
-    padrao: /package-lock\.json$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile do NPM: gerado automaticamente pela ferramenta de pacotes; polui a leitura com milhares de hashes sem representar lógica autoral.",
-  },
-  {
-    padrao: /yarn\.lock$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile do Yarn: resolução estrita de pacotes gerenciada pela máquina.",
-  },
-  {
-    padrao: /pnpm-lock\.yaml$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile do PNPM: metadados de links simbólicos e versões de dependências.",
-  },
-  {
-    padrao: /bun\.lockb?$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile binário ou textual do Bun: gerenciado internamente pelo runtime.",
-  },
-  {
-    padrao: /composer\.lock$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile do Composer (PHP): mapeamento de bibliotecas de terceiros.",
-  },
-  {
-    padrao: /Gemfile\.lock$/,
-    categoria: "lockfile",
-    justificativa: "Lockfile do Ruby/Bundler: controle estrito de versões externas.",
-  },
-  {
-    padrao: /\.lock$/,
-    categoria: "lockfile",
-    justificativa: "Lockfiles genéricos (Poetry, Cargo, etc.): descartados para priorizar código-fonte.",
-  },
-
-  // 2. Diretórios de compilação, bundling e testes
-  {
-    padrao: /dist\//,
-    categoria: "build",
-    justificativa: "Diretório de distribuição: código transpilado, minificado e semântica ilegível.",
-  },
-  {
-    padrao: /build\//,
-    categoria: "build",
-    justificativa: "Diretório de build de aplicações web ou mobile compiladas.",
-  },
-  {
-    padrao: /\.next\//,
-    categoria: "build",
-    justificativa: "Cache e compilação interna do Next.js gerada durante o desenvolvimento.",
-  },
-  {
-    padrao: /\.output\//,
-    categoria: "build",
-    justificativa: "Diretório de saída de servidores modernos (Nitro, Vinxi, Nuxt).",
-  },
-  {
-    padrao: /coverage\//,
-    categoria: "build",
-    justificativa: "Relatórios HTML e JSON de cobertura de testes automatizados (Jest, Vitest).",
-  },
-
-  // 3. Dependências de terceiros e controle do Git
-  {
-    padrao: /node_modules\//,
-    categoria: "dependencia",
-    justificativa: "Bibliotecas externas da pasta node_modules; nunca devem ser analisadas como código do usuário.",
-  },
-  {
-    padrao: /\.git\//,
-    categoria: "dependencia",
-    justificativa: "Objetos internos e referências do motor do Git.",
-  },
-
-  // 4. Imagens e formatos visuais (diff binário inútil para LLM)
-  {
-    padrao: /\.(png|jpg|jpeg|gif|ico|webp)$/i,
-    categoria: "midia",
-    justificativa: "Arquivos de imagem binários; não possuem representação textual legível no git diff.",
-  },
-  {
-    padrao: /\.svg$/i,
-    categoria: "midia",
-    justificativa: "Vetores SVG: embora sejam XML, geralmente contêm coordenadas de caminhos longos que gastam milhares de tokens sem agregar contexto de engenharia.",
-  },
-
-  // 5. Fontes tipográficas
-  {
-    padrao: /\.(woff2?|ttf|otf|eot)$/i,
-    categoria: "fonte",
-    justificativa: "Arquivos binários de fontes tipográficas.",
-  },
-
-  // 6. Mídias pesadas e documentos compactados
-  {
-    padrao: /\.(mp4|mp3|pdf|zip|tar\.gz)$/i,
-    categoria: "documento",
-    justificativa: "Vídeos, áudios, PDFs ou arquivos compactados que não suportam leitura por diff de texto.",
-  },
-];
-
-/**
- * Avalia se um arquivo alterado no commit deve ser considerado na análise de engenharia.
- * Percorre a lista de regras anti-ruído documentadas e descarta o arquivo caso corresponda a algum padrão.
- *
- * @param nomeArquivo - Caminho relativo do arquivo no repositório.
- * @returns {boolean} Retorna verdadeiro se o arquivo for código relevante, falso se for ruído descartável.
- */
-function deveIncluirArquivo(nomeArquivo: string): boolean {
-  return !REGRAS_FILTRO_ANTI_RUIDO.some((regra) => regra.padrao.test(nomeArquivo));
-}
 
 /**
  * Executa chamadas autenticadas à API oficial do GitHub (api.github.com).
@@ -594,11 +471,14 @@ export async function collectForUser(
       (await buscarDataUltimaColetaComSucesso(supabaseAdmin, idUsuario)) ??
       calcularDataInicialPadrao(configuracoes.timezone);
 
-    await supabaseAdmin
+    const { error: erroSince } = await supabaseAdmin
       .from("collection_runs")
       .update({ since_at: desdeQuando })
       .eq("id", runId)
       .eq("user_id", idUsuario);
+    if (erroSince) {
+      throw new Error("Não foi possível atualizar o acompanhamento da coleta.");
+    }
 
     // 4. Confirma o login da conta do GitHub
     let loginUsuario: string;
@@ -608,7 +488,7 @@ export async function collectForUser(
     } catch (erro) {
       const mensagem =
         erro instanceof Error ? erro.message : "Falha ao identificar conta do GitHub.";
-      await supabaseAdmin
+      const { error: erroFinal } = await supabaseAdmin
         .from("collection_runs")
         .update({
           user_id: idUsuario,
@@ -622,6 +502,10 @@ export async function collectForUser(
         })
         .eq("id", runId)
         .eq("user_id", idUsuario);
+
+      if (erroFinal) {
+        throw new Error("Não foi possível salvar o resultado da coleta.");
+      }
 
       return {
         runId,
@@ -701,7 +585,7 @@ export async function collectForUser(
 
     // 6. Caso nenhum commit novo tenha sido feito na janela de tempo
     if (commitsParaProcessar.length === 0) {
-      await supabaseAdmin
+      const { error: erroFinal } = await supabaseAdmin
         .from("collection_runs")
         .update({
           user_id: idUsuario,
@@ -715,6 +599,10 @@ export async function collectForUser(
         })
         .eq("id", runId)
         .eq("user_id", idUsuario);
+
+      if (erroFinal) {
+        throw new Error("Não foi possível salvar o resultado da coleta.");
+      }
 
       return {
         runId,
@@ -786,7 +674,7 @@ export async function collectForUser(
       const mensagemErro =
         erro instanceof Error ? erro.message : "Falha ao processar resumo com IA.";
 
-      await supabaseAdmin
+      const { error: erroFinal } = await supabaseAdmin
         .from("collection_runs")
         .update({
           user_id: idUsuario,
@@ -800,6 +688,10 @@ export async function collectForUser(
         })
         .eq("id", runId)
         .eq("user_id", idUsuario);
+
+      if (erroFinal) {
+        throw new Error("Não foi possível salvar o resultado da coleta.");
+      }
 
       return {
         runId,
@@ -851,7 +743,7 @@ export async function collectForUser(
     // 10. Finaliza a rodada com sucesso
     const mensagemSucesso = `Rascunho gerado com sucesso a partir de ${blocosDiffsTexto.length} commit(s).`;
 
-    await supabaseAdmin
+    const { error: erroFinal } = await supabaseAdmin
       .from("collection_runs")
       .update({
         user_id: idUsuario,
@@ -868,6 +760,10 @@ export async function collectForUser(
       .eq("id", runId)
       .eq("user_id", idUsuario);
 
+    if (erroFinal) {
+      throw new Error("Não foi possível salvar o resultado da coleta.");
+    }
+
     return {
       runId,
       status: "ok",
@@ -881,11 +777,15 @@ export async function collectForUser(
     const mensagemErroGeral =
       erro instanceof Error ? erro.message : "Não foi possível concluir o ciclo de coleta.";
 
-    await supabaseAdmin
+    const { error: erroRegistroCatch } = await supabaseAdmin
       .from("collection_runs")
       .update({ status: "erro", message: mensagemErroGeral })
       .eq("id", runId)
       .eq("user_id", idUsuario);
+
+    if (erroRegistroCatch) {
+      console.error("Falha ao registrar erro final na tabela collection_runs:", erroRegistroCatch);
+    }
 
     return {
       runId,
