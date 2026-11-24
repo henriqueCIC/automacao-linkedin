@@ -19,6 +19,7 @@ import {
 } from "./appUserConnections.server";
 import { callAi } from "./ai.server";
 import { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo } from "./commit-file-filter";
+import { construirPromptColetaCommits } from "./prompts";
 import type { RepositorioGitHub, CommitBrutoGitHub, OrigemGatilhoColeta } from "./types";
 
 export { REGRAS_FILTRO_ANTI_RUIDO, deveIncluirArquivo };
@@ -376,22 +377,6 @@ function calcularDataInicialPadrao(fusoHorario = "America/Bahia"): string {
 }
 
 /**
- * Prompt de sistema orientando a IA a resumir com precisão técnica a atividade do desenvolvedor.
- */
-const PROMPT_SISTEMA_COLETA = [
-  "Você é um assistente sênior de engenharia que resume a atividade de desenvolvimento de uma pessoa, em português do Brasil.",
-  "Você receberá uma lista de commits com seus respectivos diffs de código.",
-  "Escreva um resumo do dia como se o próprio desenvolvedor estivesse registrando o que realizou.",
-  "Destaque objetivamente: o que foi implementado, quais bugs foram corrigidos e qual aprendizado prático foi obtido.",
-  "Regra inviolável: Não invente fatos que não estejam nos commits. NUNCA exponha senhas, segredos, tokens ou dados sensíveis.",
-  "Se os diffs não evidenciarem um aprendizado profundo, seja honesto e direto, sem forçar conclusões.",
-  "Contexto do roadmap: o produto coleta commits do GitHub, sintetiza o DevLog com Gemini ou OpenAI, permite curadoria e publicação no LinkedIn. A evolução prevista inclui configuração de OAuth e variáveis de ambiente, validação local de ponta a ponta, notificações por e-mail, agendamento diário via GitHub Actions, otimização da coleta, carrosséis em PDF, variações de post e aprendizado do estilo de escrita.",
-  "No resumo, inclua as seções 'Progresso no plano', 'Próximos 5 passos' e 'Tecnologias e preparações'. Em 'Progresso no plano', relacione apenas os commits às etapas do roadmap. Em 'Próximos 5 passos', apresente nesta ordem: configurar OAuth do Google/GitHub no Supabase; configurar as variáveis de ambiente; validar o fluxo local de ponta a ponta; enviar o resumo diário por e-mail; agendar a coleta diária via GitHub Actions. Em 'Tecnologias e preparações', cite apenas as tecnologias necessárias para esses passos — Supabase, Google Cloud, GitHub OAuth, Gemini/OpenAI, Resend ou SendGrid e GitHub Actions — e a preparação concreta indicada pelo roadmap.",
-  "O roadmap é contexto de direção, não prova de execução: não marque uma etapa como concluída sem evidência nos commits e deixe claro quando um próximo passo ainda não foi iniciado.",
-  "Utilize tópicos claros e objetivos. Este texto servirá como diário de bordo (DevLog) para a publicação do LinkedIn.",
-].join("\n");
-
-/**
  * Função principal do fluxo de ingestão:
  * Executa a coleta completa de commits do GitHub, filtra ruídos, sintetiza via IA e gera o rascunho de post.
  *
@@ -652,7 +637,7 @@ export async function collectForUser(
       throw new Error("Não foi possível ler os diffs dos commits encontrados. Tente novamente.");
     }
 
-    // 8. Síntese Semântica com Inteligência Artificial
+    // 8. Síntese Semântica com Inteligência Artificial (aplicando o tom configurado)
     await atualizarProgresso(
       "gerando",
       `${blocosDiffsTexto.length} diff(s) processado(s). Gerando resumo e rascunho com IA…`,
@@ -660,17 +645,17 @@ export async function collectForUser(
       [...repositoriosComCommits],
     );
 
-    const payloadEntradaIA = [
-      `Usuário: ${loginUsuario}`,
-      `Período Analisado: ${desdeQuando} até ${inicioExecucao}`,
-      `Total de Commits Reais: ${blocosDiffsTexto.length}`,
-      "",
-      ...blocosDiffsTexto,
-    ].join("\n\n");
+    const promptColeta = construirPromptColetaCommits({
+      loginUsuario,
+      desdeQuando,
+      ateQuando: inicioExecucao,
+      blocosCommits: blocosDiffsTexto,
+      tom: configuracoes.default_tone,
+    });
 
     let sinteseIA: { summary: string; content: string };
     try {
-      sinteseIA = await callAi(PROMPT_SISTEMA_COLETA, payloadEntradaIA);
+      sinteseIA = await callAi(promptColeta.system, promptColeta.user);
     } catch (erro) {
       const mensagemErro =
         erro instanceof Error ? erro.message : "Falha ao processar resumo com IA.";
@@ -733,7 +718,7 @@ export async function collectForUser(
         day_entry_id: entradaDiaria.id,
         summary: sinteseIA.summary,
         content: sinteseIA.content,
-        tone: configuracoes.default_tone ?? "profissional",
+        tone: promptColeta.tomAplicado,
         status: "rascunho",
       })
       .select("id")

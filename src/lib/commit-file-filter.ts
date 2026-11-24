@@ -132,6 +132,7 @@ export const REGRAS_FILTRO_ANTI_RUIDO: readonly FiltroArquivo[] = [
  * @returns Retorna verdadeiro se o arquivo for código relevante, falso se for ruído descartável.
  */
 export function deveIncluirArquivo(nomeArquivo: string): boolean {
-  const caminhoNormalizado = nomeArquivo.replace(/\\/g, "/");
+  const caminhoNormalizado = nomeArquivo.trim().replace(/\\/g, "/");
+  if (!caminhoNormalizado) return false;
   return !REGRAS_FILTRO_ANTI_RUIDO.some((regra) => regra.padrao.test(caminhoNormalizado));
 }

@@ -164,8 +164,9 @@ export interface NotificacaoProgresso {
 
 /**
  * Tons de escrita suportados para a redação dos posts no LinkedIn.
+ * Alinhado aos contratos das telas, configurações de automação e server functions.
  */
-export type TomDeVoz = "profissional" | "tecnico" | "storytelling";
+export type TomDeVoz = "profissional" | "narrativo" | "tecnico";
 
 /**
  * Estrutura do payload retornado pela IA (Gemini ou OpenAI) após analisar os commits.

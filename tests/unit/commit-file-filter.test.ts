@@ -120,6 +120,12 @@ describe("deveIncluirArquivo", () => {
     expect(deveIncluirArquivo("src\\rebuild\\index.ts")).toBe(true);
   });
 
+  it("rejeita caminhos vazios ou compostos apenas por espaços em branco", () => {
+    expect(deveIncluirArquivo("")).toBe(false);
+    expect(deveIncluirArquivo("   ")).toBe(false);
+    expect(deveIncluirArquivo("\t\n")).toBe(false);
+  });
+
   it("mantém todas as regras documentadas com categoria e justificativa em português", () => {
     expect(REGRAS_FILTRO_ANTI_RUIDO.length).toBeGreaterThan(0);
     for (const regra of REGRAS_FILTRO_ANTI_RUIDO) {

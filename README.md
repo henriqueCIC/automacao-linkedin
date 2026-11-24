@@ -1,8 +1,8 @@
 # Automação LinkedIn
 
-**Versão preparada: 0.1.0 — experimental, anterior à fundação de testes.**
+**Versão base: 0.1.0 | Branch ativa: `melhoria/fundacao-testes` (Etapas 1 e 2 verificadas localmente — ainda não pronta para produção).**
 
-Transforma atividades de desenvolvimento em rascunhos para revisão humana. Este repositório registra o ponto de partida de um case de automação com IA. Não representa uma versão pronta para produção. A preparação local não significa que a versão já foi enviada ao GitHub; consulte o relatório de liberação.
+Transforma atividades de desenvolvimento em rascunhos para revisão humana. Este repositório registra a evolução estruturada de um case de automação com IA. Não representa ainda uma versão pronta para produção até a conclusão das etapas de segurança, integridade operacional e testes E2E (Etapas 3 e 4).
 
 ## Objetivo
 
@@ -66,7 +66,7 @@ Para visualizar a autenticação, as configurações Supabase precisam estar vá
 - `SUPABASE_SERVICE_ROLE_KEY`, credenciais OAuth, chaves de IA e `ENCRYPTION_SECRET` pertencem exclusivamente ao servidor.
 - Nunca coloque segredos em variáveis `VITE_`: elas podem integrar o pacote do navegador.
 - Gere sua própria chave de criptografia de 32 bytes em base64. Não dependa da chave fixa de fallback existente nesta versão.
-- Escolha um modelo disponível por `GEMINI_MODEL` ou `OPENAI_MODEL`; o padrão Gemini no código precisa de revisão.
+- Os modelos padrão atuais são `gemini-3.8-flash` (sobrescrevível via `GEMINI_MODEL`, ex.: `gemini-3.5-flash-lite`) e `gpt-4o-mini` (via `OPENAI_MODEL`); o tempo limite é configurável por `AI_TIMEOUT_MS` (padrão `30000`).
 - `LINKEDIN_ACCESS_TOKEN` é um fallback global legado, inadequado para uso multiusuário.
 - A rota ativa do cron consulta `cron_secrets` no banco. O helper que lê `CRON_SECRET` não está conectado a ela. Não há agendador externo configurado neste repositório.
 - `.env.example` contém somente exemplos. Ambientes, chaves privadas, builds e artefatos locais devem permanecer fora do Git.
@@ -74,37 +74,63 @@ Para visualizar a autenticação, as configurações Supabase precisam estar vá
 ## Verificações
 
 ```sh
+npm test
+npm run typecheck
 npm run lint
-./node_modules/.bin/tsc --noEmit --incremental false
 npm run build
 ```
 
-Ainda não há framework de testes, pasta `tests/`, script `test` ou script `typecheck`. Nenhuma suíte automatizada pode ser declarada aprovada.
+## Progresso e Relatórios Verificados na Branch (`melhoria/fundacao-testes`)
 
-Os resultados desta preparação estão em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md). Falhas de lint não devem ser ocultadas ou resolvidas desativando regras. Build aprovado não comprova segurança nem funcionamento das APIs.
+### Etapa 1 — Fundação de Qualidade (Concluída e Verificada)
+Registro detalhado em [docs/VERIFICACAO_ETAPA1.md](docs/VERIFICACAO_ETAPA1.md).
 
-## Erros e limitações conhecidos da 0.1.0
+- **Framework de testes:** Vitest `4.1.12` (validado via Context7 para Node 20.20.2 + Vite 8.1.5) em `vitest.config.ts` isolado dos plugins SSR, com scripts `test`, `test:watch` e `typecheck`.
+- **Extração e correção do filtro (`F01`):** `deveIncluirArquivo` extraído para módulo puro (`src/lib/commit-file-filter.ts`), ancorado por fronteira de segmento (`(^|\/)build\/`, `(^|\/)dist\/`, lockfiles), normalizando `\` e rejeitando entradas vazias.
+- **Integridade de persistência (`D03` — terminais da coleta):** Restaurada a checagem de erro de banco nos 4 caminhos terminais de `collectForUser` (autenticação, zero commits, erro na IA e sucesso) e na atualização de `since_at`, coberta por testes de regressão em `tests/unit/collect-persistence.test.ts`.
+- **Regularização do Lint (`Q01`):** Corrigidos `prefer-const` (`src/routes/fontes.tsx`), aviso de `useEffect` (`src/routes/configuracoes.tsx`) e 492 erros de formatação Prettier sem desativar nenhuma regra do ESLint.
 
-| ID | Prioridade | Problema observado | Correção planejada |
+### Etapa 2 — Camada de IA Confiável (Concluída e Verificada)
+Registro detalhado em [docs/VERIFICACAO_ETAPA2.md](docs/VERIFICACAO_ETAPA2.md).
+
+- **Schemas em execução (`IA01`):** Validação Zod de entrada e saída (`summary`: 10–1.500 chars; `content`: 20–3.000 chars) em `src/lib/ai.server.ts`, rejeitando JSON inválido ou respostas vazias antes do banco/UI.
+- **Resiliência e segurança (`IA02`):** Timeout explícito via `AbortSignal.timeout` (padrão 30s / `AI_TIMEOUT_MS`), chave do Gemini movida da URL para o cabeçalho `x-goog-api-key`, modelo padrão atualizado (`gemini-3.8-flash`) e fallback automático **Gemini → OpenAI** testado em `tests/integration/ai.server.test.ts` (sem cobrança de APIs).
+- **Prompts e tons (`IA03` e `T01`):** Novo módulo puro `src/lib/prompts.ts` separando o roadmap interno dos prompts de post, aplicando o tom configurado pelo usuário na coleta automática e alinhando `TomDeVoz` (`profissional | narrativo | tecnico`).
+
+### Evidências Consolidadas na Branch
+
+| Verificação | Comando | Resultado Atual |
+| --- | --- | --- |
+| **Testes Unitários + Integração** | `npm test` | ✅ **30/30 passando** (4 arquivos em `tests/unit/` e `tests/integration/`) |
+| **TypeScript Estrito** | `npm run typecheck` | ✅ **0 erros** |
+| **ESLint + Prettier** | `npm run lint` | ✅ **0 erros** *(7 avisos padrão do shadcn/ui `react-refresh`)* |
+| **Build de Produção** | `npm run build` | ✅ **Compilado** (cliente + servidor) |
+| **Higiene de Diff** | `git diff --check` | ✅ **0 problemas** |
+
+Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Build e testes unitários/integrados aprovados ainda não substituem a conclusão de segurança e E2E das Etapas 3 e 4.
+
+## Erros e limitações conhecidos (Acompanhamento desde a 0.1.0)
+
+| ID | Prioridade | Problema observado | Status na branch / Próxima etapa |
 | --- | --- | --- | --- |
-| Q01 | Alta | Lint reprovado e ausência de testes | Etapa 1: baseline, Vitest e testes reais |
-| IA01 | Alta | Saída da IA sem validação em execução; JSON inválido pode virar texto | Etapa 2: schemas, erros explícitos e regressões |
-| IA02 | Alta | Falha Gemini não aciona OpenAI; timeout explícito ausente | Etapa 2: política de falhas, timeout e fallback testado |
-| IA03 | Média | Prompt inclui roadmap fixo e o tom da coleta não orienta a geração | Etapa 2: separar planejamento e conteúdo, aplicar tom |
-| D01 | Alta | Commits marcados antes de salvar rascunho | Etapa 3: confirmação transacional e recuperação |
-| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | Etapa 3: preservar pendências por repositório |
-| D03 | Alta | Gravações e conclusão de execução ignoram alguns erros | Etapa 3: verificar todos os resultados de persistência |
-| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | Etapa 3: concorrência, tentativas e reconciliação |
-| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | Correção de segurança antes de produção |
-| S02 | Alta | OAuth GitHub não valida o state de retorno | Correção de segurança com teste de regressão |
-| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | OAuth individual e remoção do fallback multiusuário |
-| S04 | Alta | Filtro de ruído não é filtro de segredos | Sanitização e seleção de repositórios antes de enviar diffs |
-| A01 | Alta | Cron marca o dia mesmo após resultado de erro | Etapa 3: separar tentativa de sucesso e impedir sobreposição |
-| A02 | Alta | Fuso America/Rio_de_Janeiro inválido e cálculos de data inconsistentes | Etapa 3: validação e datas determinísticas |
-| U01 | Média | Preferências de notificação sem entrega implementada | Implementação posterior com testes |
-| U02 | Média | Cache de algumas consultas não inclui usuário | Etapas 3–4: isolamento de sessão e E2E |
-| F01 | Média | Filtro rejeita src/rebuild/app.ts por substring; entrada vazia é aceita | Etapa 1: testes e limites de segmentos |
-| T01 | Média | Tipos de domínio e contratos de tons ainda divergem | Ajustar contratos conforme uso real |
+| Q01 | Alta | Lint reprovado e ausência de testes | ✅ **Resolvido na Etapa 1** (Vitest + 0 erros de lint) |
+| F01 | Média | Filtro rejeita `src/rebuild/app.ts` por substring; entrada vazia aceita | ✅ **Resolvido nas Etapas 1–2** (`commit-file-filter.ts` + testes) |
+| IA01 | Alta | Saída da IA sem validação em execução; JSON inválido virava texto | ✅ **Resolvido na Etapa 2** (schemas Zod + `ErroCamadaIA`) |
+| IA02 | Alta | Falha Gemini não aciona OpenAI; timeout explícito ausente | ✅ **Resolvido na Etapa 2** (`AbortSignal.timeout` + fallback) |
+| IA03 | Média | Prompt inclui roadmap fixo e tom da coleta não orientava geração | ✅ **Resolvido na Etapa 2** (`src/lib/prompts.ts`) |
+| T01 | Média | Tipos de domínio e contratos de tons divergiam | ✅ **Resolvido na Etapa 2** (`TomDeVoz` unificado) |
+| D03 | Alta | Gravações e conclusão de execução ignoravam alguns erros | 🟡 **Parcial na Etapa 1** (4 caminhos terminais + `since_at` corrigidos; revisar demais fluxos na Etapa 3) |
+| D01 | Alta | Commits marcados antes de salvar rascunho | ⏳ Etapa 3: confirmação pós-persistência e recuperação |
+| D02 | Alta | Paginação limitada e marco temporal global podem deixar commits para trás | ⏳ Etapa 3: paginação e pendências por repositório |
+| P01 | Alta | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ⏳ Etapa 3: concorrência, tentativas e reconciliação |
+| S01 | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto | ⏳ Etapa 3: obrigar `ENCRYPTION_SECRET` válida |
+| S02 | Alta | OAuth GitHub não valida o `state` de retorno | ⏳ Etapa 3: validar `state` com teste de regressão |
+| S03 | Alta | Token LinkedIn global pode ser usado por outro usuário | ⏳ Etapa 3: credencial individual e remoção de fallback global |
+| S04 | Alta | Filtro de ruído não é filtro de segredos | ⏳ Etapa 3: sanitização de segredos antes de enviar diffs |
+| A01 | Alta | Cron marca o dia mesmo após resultado de erro | ⏳ Etapa 3: separar tentativa de sucesso e impedir sobreposição |
+| A02 | Alta | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes | ⏳ Etapa 3: validação IANA e datas determinísticas |
+| U01 | Média | Preferências de notificação sem entrega implementada | ⏳ Evolução posterior com testes |
+| U02 | Média | Cache de algumas consultas não inclui usuário | ⏳ Etapas 3–4: isolamento de sessão e E2E |
 
 A auditoria anterior apontou também um alerta alto em Zod. Isso deve ser revalidado antes de atualizar dependências; não foi executada atualização automática nesta preparação.
 
