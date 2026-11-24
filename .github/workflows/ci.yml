@@ -11,9 +11,9 @@ permissions:
 
 jobs:
   verificacao:
-    name: Lint, Typecheck, Testes e Build
+    name: Lint, Typecheck, Testes, Build e E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       CI: "true"
       VITE_SUPABASE_URL: "https://ci-isolado.supabase.co"
@@ -46,3 +46,19 @@ jobs:
 
       - name: Compilar cliente e servidor de produção
         run: npm run build
+
+      - name: Instalar navegador Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Executar suíte E2E com serviços simulados (Playwright)
+        run: npm run test:e2e
+
+      - name: Publicar relatório e traces E2E como artefato do CI
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-e2e-evidencias
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

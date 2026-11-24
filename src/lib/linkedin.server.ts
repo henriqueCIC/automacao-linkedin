@@ -13,6 +13,10 @@ export const LINKEDIN_CONNECTOR_ID = "linkedin";
 export const LINKEDIN_API_BASE = "https://api.linkedin.com";
 const TIMEOUT_LINKEDIN_MS = 25_000;
 
+export function obterBaseApiLinkedIn(): string {
+  return process.env["LINKEDIN_API_BASE_URL"]?.trim() || LINKEDIN_API_BASE;
+}
+
 /**
  * Obtém exclusivamente a credencial individual do LinkedIn pertencente ao usuário autenticado (S03).
  * Nunca utiliza variáveis de ambiente globais para evitar compartilhamento de conta entre usuários.
@@ -115,9 +119,10 @@ export async function publicarRascunhoAprovadoNoLinkedIn(
   };
 
   // 3. Consulta identidade (anterior ao efeito colateral de publicar — seguro reverter se falhar)
+  const baseLinkedIn = obterBaseApiLinkedIn();
   let meSub: string;
   try {
-    const meRes = await fetch(`${LINKEDIN_API_BASE}/v2/userinfo`, {
+    const meRes = await fetch(`${baseLinkedIn}/v2/userinfo`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(TIMEOUT_LINKEDIN_MS),
     });
@@ -146,7 +151,7 @@ export async function publicarRascunhoAprovadoNoLinkedIn(
   // 4. Envia publicação ao LinkedIn
   let postRes: Response;
   try {
-    postRes = await fetch(`${LINKEDIN_API_BASE}/v2/ugcPosts`, {
+    postRes = await fetch(`${baseLinkedIn}/v2/ugcPosts`, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${token}`,

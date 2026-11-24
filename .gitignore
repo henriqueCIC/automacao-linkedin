@@ -46,3 +46,6 @@ dist-ssr
 .lovable/
 graphify-out/
 supabase/.temp/
+playwright-report/
+test-results/
+blob-report/

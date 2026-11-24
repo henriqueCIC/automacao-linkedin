@@ -181,7 +181,9 @@ async function chamarGemini(
   timeoutMs: number,
 ): Promise<AiDraft> {
   const modelo = process.env["GEMINI_MODEL"]?.trim() || MODELO_PADRAO_GEMINI;
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelo)}:generateContent`;
+  const baseUrl =
+    process.env["GEMINI_API_BASE_URL"]?.trim() || "https://generativelanguage.googleapis.com";
+  const url = `${baseUrl}/v1beta/models/${encodeURIComponent(modelo)}:generateContent`;
 
   let res: Response;
   try {

@@ -63,9 +63,8 @@ async function chamarApiGitHub(
   cabecalhos.set("Accept", "application/vnd.github.v3+json");
   cabecalhos.set("User-Agent", "Automacao-LinkedIn-App");
 
-  const urlFinal = caminhoOuUrl.startsWith("http")
-    ? caminhoOuUrl
-    : `https://api.github.com${caminhoOuUrl}`;
+  const baseGitHub = process.env["GITHUB_API_BASE_URL"]?.trim() || "https://api.github.com";
+  const urlFinal = caminhoOuUrl.startsWith("http") ? caminhoOuUrl : `${baseGitHub}${caminhoOuUrl}`;
 
   const metodo = (init?.method ?? "GET").toUpperCase();
   const ehIdempotente = metodo === "GET" || metodo === "HEAD";

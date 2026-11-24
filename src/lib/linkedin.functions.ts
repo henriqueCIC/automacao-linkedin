@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
-  LINKEDIN_API_BASE,
+  obterBaseApiLinkedIn,
   obterTokenLinkedInDoUsuario,
   publicarRascunhoAprovadoNoLinkedIn,
 } from "./linkedin.server";
@@ -14,7 +14,7 @@ export const getLinkedInStatus = createServerFn({ method: "GET" })
     const token = await obterTokenLinkedInDoUsuario(context.userId);
     if (!token) return { connected: false as const };
 
-    const res = await fetch(`${LINKEDIN_API_BASE}/v2/userinfo`, {
+    const res = await fetch(`${obterBaseApiLinkedIn()}/v2/userinfo`, {
       headers: {
         Authorization: `Bearer ${token}`,
       },
@@ -51,7 +51,7 @@ export const checkPublishedPost = createServerFn({ method: "POST" })
     }
 
     const res = await fetch(
-      `${LINKEDIN_API_BASE}/v2/ugcPosts/${encodeURIComponent(draft.linkedin_post_id)}`,
+      `${obterBaseApiLinkedIn()}/v2/ugcPosts/${encodeURIComponent(draft.linkedin_post_id)}`,
       {
         headers: {
           Authorization: `Bearer ${token}`,

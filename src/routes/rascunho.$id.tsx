@@ -238,6 +238,7 @@ function DraftPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <Textarea
+              aria-label="Texto do post"
               rows={14}
               value={content}
               disabled={published}
@@ -298,6 +299,7 @@ function DraftPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
+                aria-label="Complementar o que foi feito"
                 rows={4}
                 placeholder="Ex.: faltou citar que a entrega foi em equipe e deixe o tom menos formal."
                 value={feedback}
