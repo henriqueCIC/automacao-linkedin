@@ -59,10 +59,16 @@ test("QA 1: protege todas as rotas privadas redirecionando visitante não autent
     await expect(page).toHaveURL(/\/auth$/);
   }
 
-  // Valida bloqueio amigável de provedores sociais não configurados no Supabase Auth (sem cair em JSON 400)
+  // Valida bloqueio amigável de provedores sociais desativados (GitHub) ou com OAuth secret ausente (Google)
   await page.getByRole("button", { name: "GitHub" }).click();
   await expect(
     page.getByText(/O login social com GitHub não está ativado no Supabase Auth/i),
+  ).toBeVisible();
+  await expect(page).toHaveURL(/\/auth$/);
+
+  await page.getByRole("button", { name: "Google" }).click();
+  await expect(
+    page.getByText(/O login social com Google não está ativado no painel do Supabase Auth/i),
   ).toBeVisible();
   await expect(page).toHaveURL(/\/auth$/);
 

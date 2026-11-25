@@ -41,7 +41,23 @@ async function verificarProvedorOAuthSupabase(provider: "google" | "github"): Pr
     const settings = (await res.json()) as {
       external?: Record<string, boolean | undefined>;
     };
-    return settings.external?.[provider] === true;
+    if (settings.external?.[provider] !== true) {
+      return false;
+    }
+
+    // Mesmo com a flag "enabled: true" no painel do Supabase, o provedor pode estar sem Client Secret
+    // ("Unsupported provider: missing OAuth secret", HTTP 400 em /auth/v1/authorize).
+    const authorizeCheck = await fetch(
+      `${supabaseUrl}/auth/v1/authorize?provider=${encodeURIComponent(provider)}`,
+      { redirect: "manual" },
+    );
+    if (
+      authorizeCheck.type === "opaqueredirect" ||
+      (authorizeCheck.status >= 300 && authorizeCheck.status < 400)
+    ) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }

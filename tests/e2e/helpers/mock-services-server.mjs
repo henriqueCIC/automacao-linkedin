@@ -211,9 +211,18 @@ export function iniciarServidorMockE2E(porta = 54329) {
       responderJson(res, 200, {
         external: {
           email: true,
-          google: false,
+          google: true,
           github: false,
         },
+      });
+      return;
+    }
+
+    if (pathname === "/auth/v1/authorize" && req.method === "GET") {
+      responderJson(res, 400, {
+        code: 400,
+        error_code: "validation_failed",
+        msg: "Unsupported provider: missing OAuth secret",
       });
       return;
     }
