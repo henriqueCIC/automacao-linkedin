@@ -43,7 +43,10 @@ export const startGitHubOAuth = createServerFn({ method: "POST" })
       scope: GITHUB_SCOPES.join(" "),
       state,
     });
-    const authorizationUrl = `https://github.com/login/oauth/authorize?${params.toString()}`;
+    const authorizeBase =
+      process.env["GITHUB_OAUTH_AUTHORIZE_URL"]?.trim() ||
+      "https://github.com/login/oauth/authorize";
+    const authorizationUrl = `${authorizeBase}?${params.toString()}`;
     return { authorizationUrl };
   });
 
@@ -62,8 +65,11 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
     const { clientId, clientSecret } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
 
-    // Troca o código pelo access_token na API oficial do GitHub
-    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+    // Troca o código pelo access_token na API oficial do GitHub (ou endpoint simulado local)
+    const tokenEndpoint =
+      process.env["GITHUB_OAUTH_TOKEN_URL"]?.trim() ||
+      "https://github.com/login/oauth/access_token";
+    const tokenRes = await fetch(tokenEndpoint, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -94,9 +100,12 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
     }
 
     // Busca o login do usuário no GitHub
+    const githubApiBase = (
+      process.env["GITHUB_API_BASE_URL"]?.trim() || "https://api.github.com"
+    ).replace(/\/+$/, "");
     let accountLogin: string | null = null;
     try {
-      const userRes = await fetch("https://api.github.com/user", {
+      const userRes = await fetch(`${githubApiBase}/user`, {
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
           Accept: "application/vnd.github.v3+json",

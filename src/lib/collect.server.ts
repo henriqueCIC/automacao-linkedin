@@ -816,13 +816,16 @@ export async function collectForUser(
     );
 
     const dataHoje = partesDataHoraNoFuso(configuracoes.timezone).data;
+    const leituraOriginalCommits = [`Resumo da leitura: ${sinteseIA.summary}`, ...blocosDiffsTexto]
+      .join("\n\n")
+      .slice(0, 8000);
 
     const { data: entradaDiaria, error: erroEntrada } = await supabaseAdmin
       .from("day_entries")
       .insert({
         user_id: idUsuario,
         entry_date: dataHoje,
-        raw_notes: sinteseIA.summary,
+        raw_notes: leituraOriginalCommits,
         source: "github",
       })
       .select("id")

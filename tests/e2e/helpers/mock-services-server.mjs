@@ -62,17 +62,40 @@ const USUARIOS_FIXOS = [
     password: "senha-segura-bruno",
     user_metadata: { full_name: "Bruno Costa" },
   },
+  {
+    id: "33333333-3333-4333-8333-333333333333",
+    email: "henrique@exemplo.com",
+    password: "henrique123",
+    user_metadata: { full_name: "Henrique Barreto" },
+  },
 ];
 
 function criarEstadoInicial() {
   const agoraIso = new Date().toISOString();
   return {
     failNextGemini: false,
+    commitSearchCount: 0,
+    initialGenerationCount: 0,
+    refineGenerationCount: 0,
     publishedLinkedInPosts: [],
+    usuariosDinamicos: [...USUARIOS_FIXOS],
     tables: {
       automation_settings: [
         {
           user_id: USUARIOS_FIXOS[0].id,
+          enabled: true,
+          daily_time: "18:00",
+          timezone: "America/Bahia",
+          default_tone: "profissional",
+          max_commits_per_day: 15,
+          notify_desktop: true,
+          notify_email: false,
+          last_run_date: null,
+          created_at: agoraIso,
+          updated_at: agoraIso,
+        },
+        {
+          user_id: USUARIOS_FIXOS[2].id,
           enabled: true,
           daily_time: "18:00",
           timezone: "America/Bahia",
@@ -102,6 +125,17 @@ function criarEstadoInicial() {
           connector_id: "linkedin",
           connection_key_ciphertext: encryptForMockDb("li_e2e_token_ana"),
           account_login: "ana-linkedin",
+          reconnect_required: false,
+          created_at: agoraIso,
+          updated_at: agoraIso,
+        },
+        // Henrique começa com LinkedIn conectado e GitHub desconectado para validar o Git após login!
+        {
+          id: randomUUID(),
+          user_id: USUARIOS_FIXOS[2].id,
+          connector_id: "linkedin",
+          connection_key_ciphertext: encryptForMockDb("li_e2e_token_henrique"),
+          account_login: "henrique-linkedin",
           reconnect_required: false,
           created_at: agoraIso,
           updated_at: agoraIso,
@@ -227,9 +261,51 @@ export function iniciarServidorMockE2E(porta = 54329) {
       return;
     }
 
+    if (pathname === "/auth/v1/signup" && req.method === "POST") {
+      const body = corpoTexto ? JSON.parse(corpoTexto) : {};
+      const email = String(body.email ?? "").trim();
+      const password = String(body.password ?? "");
+      if (!email || password.length < 6) {
+        responderJson(res, 400, {
+          code: "validation_failed",
+          msg: "Informe um e-mail válido e senha com pelo menos 6 caracteres.",
+        });
+        return;
+      }
+      let user = state.usuariosDinamicos.find((u) => u.email === email);
+      if (!user) {
+        user = {
+          id: randomUUID(),
+          email,
+          password,
+          user_metadata: {
+            full_name: body.data?.full_name || email.split("@")[0] || "Usuário",
+          },
+        };
+        state.usuariosDinamicos.push(user);
+      }
+      const token = criarJwtSimulado(user);
+      const nowSec = Math.floor(Date.now() / 1000);
+      responderJson(res, 200, {
+        access_token: token,
+        token_type: "bearer",
+        expires_in: 3600,
+        expires_at: nowSec + 3600,
+        refresh_token: `rt-${user.id}`,
+        user: {
+          id: user.id,
+          aud: "authenticated",
+          role: "authenticated",
+          email: user.email,
+          user_metadata: user.user_metadata,
+        },
+      });
+      return;
+    }
+
     if (pathname === "/auth/v1/token" && req.method === "POST") {
       const body = corpoTexto ? JSON.parse(corpoTexto) : {};
-      const user = USUARIOS_FIXOS.find(
+      const user = state.usuariosDinamicos.find(
         (u) => u.email === body.email && u.password === body.password,
       );
       if (!user) {
@@ -260,7 +336,7 @@ export function iniciarServidorMockE2E(porta = 54329) {
 
     if (pathname === "/auth/v1/user" && req.method === "GET") {
       const sub = decodificarSubDoBearer(req.headers.authorization);
-      const user = USUARIOS_FIXOS.find((u) => u.id === sub);
+      const user = state.usuariosDinamicos.find((u) => u.id === sub);
       if (!user) {
         responderJson(res, 401, { msg: "Sessão inválida." });
         return;
@@ -409,18 +485,43 @@ export function iniciarServidorMockE2E(porta = 54329) {
       }
     }
 
-    // 4. GitHub API Simulada (/github/...)
+    // 4. GitHub OAuth e GitHub REST API Simulados (/github-oauth/... e /github/...)
+    if (pathname === "/github-oauth/authorize" && req.method === "GET") {
+      const redirectUri =
+        url.searchParams.get("redirect_uri") ?? "http://localhost:5173/oauth/github/return";
+      const oauthState = url.searchParams.get("state") ?? "";
+      const target = new URL(redirectUri);
+      target.searchParams.set("code", "gh_oauth_code_henrique_valido");
+      target.searchParams.set("state", oauthState);
+      res.writeHead(302, { Location: target.toString() });
+      res.end();
+      return;
+    }
+
+    if (pathname === "/github-oauth/access_token" && req.method === "POST") {
+      responderJson(res, 200, {
+        access_token: "gho_henrique_token_conectado",
+        token_type: "bearer",
+        scope: "repo,read:user",
+      });
+      return;
+    }
+
     if (pathname === "/github/user" && req.method === "GET") {
-      responderJson(res, 200, { login: "ana-dev" });
+      const auth = String(req.headers.authorization ?? "");
+      const login = auth.includes("henrique") ? "henriqueCIC" : "ana-dev";
+      responderJson(res, 200, { login });
       return;
     }
 
     if (pathname === "/github/user/repos" && req.method === "GET") {
+      const auth = String(req.headers.authorization ?? "");
+      const ownerLogin = auth.includes("henrique") ? "henriqueCIC" : "ana-dev";
       responderJson(res, 200, [
         {
-          full_name: "ana-dev/automacao-linkedin",
+          full_name: `${ownerLogin}/automacao-linkedin`,
           name: "automacao-linkedin",
-          owner: { login: "ana-dev" },
+          owner: { login: ownerLogin },
           pushed_at: new Date().toISOString(),
           private: false,
         },
@@ -428,16 +529,29 @@ export function iniciarServidorMockE2E(porta = 54329) {
       return;
     }
 
-    if (pathname === "/github/repos/ana-dev/automacao-linkedin/commits" && req.method === "GET") {
+    if (
+      (pathname === "/github/repos/ana-dev/automacao-linkedin/commits" ||
+        pathname === "/github/repos/henriqueCIC/automacao-linkedin/commits") &&
+      req.method === "GET"
+    ) {
+      state.commitSearchCount += 1;
+      const n = state.commitSearchCount;
+      const mensagensPorCiclo = [
+        "feat: adiciona validação com Zod e testes E2E no fluxo de revisão",
+        "sec: implementa state OAuth assinado com HMAC-SHA256 e criptografia AES-256-GCM",
+        "fix: garante confirmação tardia de seen_commits e reserva atômica na publicação LinkedIn",
+        "feat: adiciona observabilidade estruturada sem segredos e fallback Gemini -> OpenAI",
+      ];
+      const msg = mensagensPorCiclo[(n - 1) % mensagensPorCiclo.length];
       responderJson(res, 200, [
         {
-          sha: "e2e111222333444555666777888999000aaabbbc",
-          html_url: "https://github.com/ana-dev/automacao-linkedin/commit/e2e1112",
+          sha: `e2e111222333444555666777888999000aaabb${String(n).padStart(2, "0")}`,
+          html_url: `https://github.com/henriqueCIC/automacao-linkedin/commit/e2e111${n}`,
           commit: {
-            message: "feat: adiciona validação com Zod e testes E2E no fluxo de revisão",
+            message: msg,
             author: {
-              name: "Ana Silva",
-              email: "ana@exemplo.com",
+              name: "Henrique Barreto",
+              email: "henrique@exemplo.com",
               date: new Date().toISOString(),
             },
           },
@@ -447,25 +561,49 @@ export function iniciarServidorMockE2E(porta = 54329) {
     }
 
     if (
-      pathname.startsWith("/github/repos/ana-dev/automacao-linkedin/commits/") &&
+      (pathname.startsWith("/github/repos/ana-dev/automacao-linkedin/commits/") ||
+        pathname.startsWith("/github/repos/henriqueCIC/automacao-linkedin/commits/")) &&
       req.method === "GET"
     ) {
       const sha = pathname.split("/").pop();
+      const n = state.commitSearchCount || 1;
+      const arquivosPorCiclo = [
+        {
+          filename: "src/lib/ai.server.ts",
+          patch:
+            "+ export const SaidaRascunhoIASchema = z.object({ summary: z.string(), content: z.string() });",
+        },
+        {
+          filename: "src/lib/oauthState.server.ts",
+          patch:
+            "+ export function validarStateOAuth(state: string, userIdEsperado: string) { /* HMAC-SHA256 + TTL */ }",
+        },
+        {
+          filename: "src/lib/linkedin.server.ts",
+          patch:
+            "+ // Reserva atômica Compare-And-Swap: aprovado -> publicando antes do POST /v2/ugcPosts",
+        },
+        {
+          filename: "src/lib/observability.server.ts",
+          patch:
+            "+ export function registrarEventoOperacional(evento) { /* JSON estruturado com redação de segredos */ }",
+        },
+      ];
+      const arq = arquivosPorCiclo[(n - 1) % arquivosPorCiclo.length];
       responderJson(res, 200, {
         sha,
-        html_url: `https://github.com/ana-dev/automacao-linkedin/commit/${sha}`,
+        html_url: `https://github.com/henriqueCIC/automacao-linkedin/commit/${sha}`,
         commit: {
-          message: "feat: adiciona validação com Zod e testes E2E no fluxo de revisão",
+          message: `Ciclo #${n} de leitura de commits do repositório automacao-linkedin`,
           author: { date: new Date().toISOString() },
         },
         files: [
           {
-            filename: "src/lib/ai.server.ts",
+            filename: arq.filename,
             status: "modified",
             additions: 24,
             deletions: 4,
-            patch:
-              "+ export const SaidaRascunhoIASchema = z.object({ summary: z.string(), content: z.string() });",
+            patch: arq.patch,
           },
         ],
       });
@@ -484,17 +622,50 @@ export function iniciarServidorMockE2E(porta = 54329) {
       const textoUsuario = body?.contents?.[0]?.parts?.[0]?.text ?? "";
       const ehRefinamento = textoUsuario.includes("Ajustes pedidos pela pessoa");
 
-      const rascunho = ehRefinamento
-        ? {
+      let rascunho;
+      if (ehRefinamento) {
+        state.refineGenerationCount += 1;
+        const instrucaoBruta =
+          textoUsuario.split("Ajustes pedidos pela pessoa:")[1]?.trim() ||
+          "adaptar abordagem técnica";
+        const instrucaoLimpa = instrucaoBruta.split("\n")[0].trim();
+
+        if (/em equipe/i.test(instrucaoBruta)) {
+          rascunho = {
             summary: "Validação com schemas Zod, testes E2E e revisão colaborativa em equipe.",
             content:
               "Hoje concluímos em equipe a camada de validação com Zod e os testes ponta a ponta da nossa automação para LinkedIn. Garantimos que nenhum texto seja publicado sem aprovação humana explícita. #TypeScript #Qualidade #EngenhariaDeSoftware",
-          }
-        : {
+          };
+        } else {
+          rascunho = {
+            summary: `Re-rascunho adaptado (#${state.refineGenerationCount}) aplicando sua orientação: "${instrucaoLimpa.slice(0, 90)}".`,
+            content: `Re-rascunho adaptado conforme sua direção (${instrucaoLimpa}):\n\n• Contexto lido dos commits: refatoração de segurança, validação em tempo de execução e integridade do fluxo de coleta.\n• O que mudou na prática: eliminamos estados inconsistentes e garantimos revisão humana obrigatória antes de qualquer publicação.\n• Resultado: código auditável, testado ponta a ponta e adaptado exatamente ao foco solicitado.\n\n#EngenhariaDeSoftware #TypeScript #Arquitetura #Qualidade`,
+          };
+        }
+      } else {
+        state.initialGenerationCount += 1;
+        const variacoesIniciais = [
+          {
             summary: "Implementada validação de schemas Zod na camada de IA e suíte de testes E2E.",
             content:
               "Hoje avancei na confiabilidade da nossa automação de posts técnicos: adicionei schemas em tempo de execução com Zod e testes ponta a ponta cobrindo coleta, revisão e aprovação humana antes da publicação. #TypeScript #Testes #IA",
-          };
+          },
+          {
+            summary:
+              "Nova leitura de commits (Abordagem 2): Segurança OAuth com HMAC-SHA256, criptografia AES-256-GCM e reserva atômica.",
+            content:
+              "Bastidores de segurança e integridade que implementei nos commits recentes:\n\n1. OAuth do GitHub com state assinado via HMAC-SHA256 e janela de expiração;\n2. Credenciais criptografadas por usuário com AES-256-GCM (chave de 32 bytes obrigatória);\n3. Reserva atômica Compare-And-Swap antes de publicar no LinkedIn, evitando posts duplicados.\n\nSegurança não é detalhe opcional — é requisito de base. #Seguranca #TypeScript #Backend #OAuth",
+          },
+          {
+            summary:
+              "Nova leitura de commits (Abordagem 3): Resiliência com fallback Gemini -> OpenAI e observabilidade sem vazamento de segredos.",
+            content:
+              "Como tornar uma integração com LLMs resiliente de verdade em produção?\n\nNos últimos commits estruturei três pilares:\n• Timeout explícito com AbortSignal e fallback automático Gemini → OpenAI;\n• Sanitização de diffs para mascarar tokens e chaves privadas antes do prompt;\n• Confirmação tardia de seen_commits somente após o rascunho estar salvo no banco.\n\n#IA #EngenhariaDeSoftware #Resiliencia #Observabilidade",
+          },
+        ];
+        const idx = (state.initialGenerationCount - 1) % variacoesIniciais.length;
+        rascunho = variacoesIniciais[idx];
+      }
 
       responderJson(res, 200, {
         candidates: [{ content: { parts: [{ text: JSON.stringify(rascunho) }] } }],

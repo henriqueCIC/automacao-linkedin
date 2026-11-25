@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -65,6 +65,7 @@ function DraftPage() {
   const [content, setContent] = useState("");
   const [feedback, setFeedback] = useState("");
   const [dirty, setDirty] = useState(false);
+  const campoAdaptacaoRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!loading && !session) void navigate({ to: "/auth" });
@@ -122,18 +123,30 @@ function DraftPage() {
         .eq("id", id)
         .eq("user_id", userId!);
       if (error) throw new Error(error.message);
+      if (status === "rejeitado") {
+        // Libera os commits vistos para permitir nova busca e geração de rascunho diferente no menu principal
+        await supabase.from("seen_commits").delete().eq("user_id", userId!);
+      }
       return status;
     },
     onSuccess: async (status) => {
       setDirty(false);
       await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
+      if (status === "rejeitado") {
+        toast.info(
+          "Rascunho rejeitado. Conte abaixo como gostaria de adaptá-lo para gerarmos um re-rascunho.",
+        );
+        setTimeout(() => {
+          campoAdaptacaoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          campoAdaptacaoRef.current?.focus();
+        }, 80);
+        return;
+      }
       toast.success(
         status === "aprovado"
           ? "Aprovado. Agora você pode publicar quando quiser."
-          : status === "rejeitado"
-            ? "Rascunho rejeitado."
-            : "Alterações salvas.",
+          : "Alterações salvas.",
       );
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Algo deu errado."),
@@ -192,6 +205,7 @@ function DraftPage() {
   const status = draft.data.status as string;
   const entry = draft.data.day_entries as { entry_date?: string; raw_notes?: string } | null;
   const approved = status === "aprovado";
+  const rejected = status === "rejeitado";
   const published = status === "publicado";
   const connected = linkedIn.data?.connected === true;
 
@@ -301,29 +315,50 @@ function DraftPage() {
         </Card>
 
         {!published && (
-          <Card>
+          <Card className={rejected ? "border-primary bg-primary/5 shadow-md" : undefined}>
             <CardHeader>
-              <CardTitle className="font-display text-2xl">Complementar o que foi feito</CardTitle>
+              <CardTitle className="font-display text-2xl">
+                {rejected
+                  ? "Como podemos adaptar este rascunho? (Re-rascunho)"
+                  : "Complementar o que foi feito"}
+              </CardTitle>
               <CardDescription>
-                Conte o que ficou de fora ou o que deve mudar e uma nova versão é gerada para nova
-                revisão.
+                {rejected
+                  ? "Você rejeitou a versão acima. Explique como ela poderia ser adaptada ou o que você quer destacar — faremos um novo re-rascunho com base nas suas orientações e na leitura original dos commits/anotações."
+                  : "Conte o que ficou de fora ou o que deve mudar e uma nova versão é gerada para nova revisão."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
+                ref={campoAdaptacaoRef}
                 aria-label="Complementar o que foi feito"
                 rows={4}
-                placeholder="Ex.: faltou citar que a entrega foi em equipe e deixe o tom menos formal."
+                placeholder={
+                  rejected
+                    ? "Ex.: Adapte para um tom mais direto em tópicos, focando no problema real que resolvi nos commits e sem introdução longa."
+                    : "Ex.: faltou citar que a entrega foi em equipe e deixe o tom menos formal."
+                }
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
               />
-              <Button
-                variant="secondary"
-                onClick={() => refine.mutate()}
-                disabled={refine.isPending || feedback.trim().length < 5}
-              >
-                {refine.isPending ? "Reescrevendo…" : "Gerar nova versão"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  variant={rejected ? "default" : "secondary"}
+                  onClick={() => refine.mutate()}
+                  disabled={refine.isPending || feedback.trim().length < 5}
+                >
+                  {refine.isPending
+                    ? "Gerando re-rascunho…"
+                    : rejected
+                      ? "Fazer re-rascunho com base nisso"
+                      : "Gerar nova versão"}
+                </Button>
+                {rejected && (
+                  <Button asChild variant="outline">
+                    <Link to="/">Voltar ao menu e buscar commits novamente</Link>
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}

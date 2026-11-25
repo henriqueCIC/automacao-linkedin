@@ -6,15 +6,15 @@
 import { spawn } from "node:child_process";
 import { E2E_ENCRYPTION_SECRET, iniciarServidorMockE2E } from "./mock-services-server.mjs";
 
-const MOCK_PORT = 54329;
-const APP_PORT = 5179;
+const MOCK_PORT = Number(process.env["MOCK_PORT"] || 54329);
+const APP_PORT = Number(process.env["APP_PORT"] || 5179);
 const MOCK_BASE = `http://127.0.0.1:${MOCK_PORT}`;
 
 const mockServer = await iniciarServidorMockE2E(MOCK_PORT);
 
 const viteProcess = spawn(
   process.platform === "win32" ? "npx.cmd" : "npx",
-  ["vite", "dev", "--host", "127.0.0.1", "--port", String(APP_PORT), "--strictPort"],
+  ["vite", "dev", "--host", "--port", String(APP_PORT), "--strictPort"],
   {
     stdio: "inherit",
     env: {
@@ -29,6 +29,10 @@ const viteProcess = spawn(
       GEMINI_MODEL: "gemini-3.8-flash",
       GEMINI_API_BASE_URL: `${MOCK_BASE}/gemini`,
       GITHUB_API_BASE_URL: `${MOCK_BASE}/github`,
+      GITHUB_CLIENT_ID: "gh_client_id_local",
+      GITHUB_CLIENT_SECRET: "gh_client_secret_local",
+      GITHUB_OAUTH_AUTHORIZE_URL: `${MOCK_BASE}/github-oauth/authorize`,
+      GITHUB_OAUTH_TOKEN_URL: `${MOCK_BASE}/github-oauth/access_token`,
       LINKEDIN_API_BASE_URL: `${MOCK_BASE}/linkedin`,
       CRON_SECRET: "e2e-cron-secret",
     },

@@ -130,11 +130,28 @@ test("QA 2: valida limites de formulário na Home, importa arquivo .md e exercit
   await expect(page.getByText(/Alterações salvas/i)).toBeVisible();
   await expect(page.getByRole("button", { name: "Publicar agora" })).toBeDisabled();
 
-  // 7. Rejeita o rascunho e confirma que publicação continua bloqueada
+  // 7. Rejeita o rascunho, valida abertura do fluxo de adaptação (Re-rascunho) e gera novo re-rascunho adaptado
   await page.getByRole("button", { name: "Rejeitar" }).click();
   await expect(page.getByText(/Rascunho rejeitado/i)).toBeVisible();
   await expect(page.getByText("Rejeitado", { exact: true })).toBeVisible();
+  await expect(page.getByText("Como podemos adaptar este rascunho? (Re-rascunho)")).toBeVisible();
   await expect(page.getByRole("button", { name: "Publicar agora" })).toBeDisabled();
+
+  await page
+    .getByLabel("Complementar o que foi feito")
+    .fill("Foque em tópicos diretos sobre segurança OAuth e integridade de dados.");
+  await page.getByRole("button", { name: "Fazer re-rascunho com base nisso" }).click();
+  await expect(campoPost).toHaveValue(/Re-rascunho adaptado conforme sua direção/i);
+  await expect(page.getByText("Aguardando sua revisão", { exact: true })).toBeVisible();
+
+  // 8. Volta ao menu principal e busca commits novamente para receber outro rascunho diferente
+  await page.getByRole("link", { name: "Diário → LinkedIn" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: "Buscar meus commits agora" }).click();
+  await expect(page).toHaveURL(/\/rascunho\/.+$/);
+  await expect(page.getByLabel("Texto do post")).toHaveValue(
+    /Bastidores de segurança e integridade/i,
+  );
 
   expect(errosDePagina).toEqual([]);
 });
