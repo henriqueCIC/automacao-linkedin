@@ -207,6 +207,17 @@ export function iniciarServidorMockE2E(porta = 54329) {
     }
 
     // 2. Supabase Auth (GoTrue)
+    if (pathname === "/auth/v1/settings" && req.method === "GET") {
+      responderJson(res, 200, {
+        external: {
+          email: true,
+          google: false,
+          github: false,
+        },
+      });
+      return;
+    }
+
     if (pathname === "/auth/v1/token" && req.method === "POST") {
       const body = corpoTexto ? JSON.parse(corpoTexto) : {};
       const user = USUARIOS_FIXOS.find(

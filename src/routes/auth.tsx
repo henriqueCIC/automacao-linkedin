@@ -29,6 +29,24 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+async function verificarProvedorOAuthSupabase(provider: "google" | "github"): Promise<boolean> {
+  const supabaseUrl = import.meta.env["VITE_SUPABASE_URL"];
+  const supabaseKey = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
+  if (!supabaseUrl || !supabaseKey) return false;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/settings`, {
+      headers: { apikey: supabaseKey },
+    });
+    if (!res.ok) return false;
+    const settings = (await res.json()) as {
+      external?: Record<string, boolean | undefined>;
+    };
+    return settings.external?.[provider] === true;
+  } catch {
+    return false;
+  }
+}
+
 function AuthPage() {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
@@ -71,6 +89,12 @@ function AuthPage() {
   async function onGoogle() {
     setBusy(true);
     try {
+      const ativo = await verificarProvedorOAuthSupabase("google");
+      if (!ativo) {
+        throw new Error(
+          "O login social com Google não está ativado no painel do Supabase Auth. Entre ou crie sua conta com e-mail e senha abaixo.",
+        );
+      }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -88,6 +112,12 @@ function AuthPage() {
   async function onGitHub() {
     setBusy(true);
     try {
+      const ativo = await verificarProvedorOAuthSupabase("github");
+      if (!ativo) {
+        throw new Error(
+          "O login social com GitHub não está ativado no Supabase Auth. Entre com e-mail e senha abaixo e depois conecte o GitHub na aba Fontes.",
+        );
+      }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
