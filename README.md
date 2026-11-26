@@ -1,169 +1,367 @@
-# Automação LinkedIn
+<div align="center">
 
-**Versão base: 0.1.0 | Branch ativa: `melhoria/fundacao-testes` (Etapas 1, 2, 3 e 4 concluídas e verificadas localmente).**
+# Diário → LinkedIn
 
-Transforma atividades de desenvolvimento em rascunhos para revisão humana. Este repositório registra a evolução estruturada de um case de automação com IA com contratos tipados, validação em tempo de execução, proteção criptográfica e OAuth autenticado, integridade transacional, observabilidade estruturada sem segredos, pipeline de CI e testes ponta a ponta (Playwright).
+**Transforme seus commits do GitHub e anotações de engenharia em publicações técnicas para o LinkedIn — com filtro anti-ruído, validação em tempo de execução, segurança criptográfica e aprovação humana obrigatória.**
 
-## Objetivo
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.8_Strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
+[![TanStack Start](https://img.shields.io/badge/TanStack_Start-React_19_SSR-FF4154?logo=react&logoColor=white)](package.json)
+[![Supabase](https://img.shields.io/badge/Supabase-Auth_%2B_PostgreSQL_RLS-3ECF8E?logo=supabase&logoColor=white)](src/integrations/supabase/)
+[![Vitest](https://img.shields.io/badge/Vitest-56%2F56_Passing-6E9F18?logo=vitest&logoColor=white)](vitest.config.ts)
+[![Playwright E2E](https://img.shields.io/badge/Playwright_E2E_%2B_QA-8%2F8_Passing-2EAD33?logo=playwright&logoColor=white)](playwright.config.ts)
+[![ESLint](https://img.shields.io/badge/ESLint_%2B_Prettier-0_Errors-4B32C3?logo=eslint&logoColor=white)](eslint.config.js)
+[![Gate Global Fase 6](<https://img.shields.io/badge/Gate_Global_Fase_6-Aprovado_(2_Auditorias)-0A66C2>)](docs/AUDITORIAS_ETAPAS_1_A_4.md)
 
-Aprender e demonstrar engenharia de software aplicada à IA: contratos tipados, testes de comportamento, recuperação de falhas, segurança, observabilidade e aprovação humana obrigatória. LangGraph (Etapa 5) será considerado somente após revisão e decisão explícita sobre a base estabilizada das Etapas 1 a 4.
+[Visão Geral](#-visão-geral) •
+[Tour Visual (Prints)](#-tour-visual-da-aplicação) •
+[Arquitetura](#-arquitetura-do-sistema) •
+[Melhorias no Código (Antes vs. Depois)](#-melhorias-de-engenharia-no-código-branch-melhoriafundacao-testes) •
+[Segurança & Integridade](#-segurança-e-integridade-operacional) •
+[Suíte de Testes & QA](#-suíte-de-testes-e-qa-exploratório) •
+[Como Executar](#-como-executar-localmente)
 
-## Recursos presentes e verificados no código
+</div>
 
-- Autenticação com Supabase e conexão OAuth com GitHub protegida por `state` assinado via `HMAC-SHA256` com expiração e vínculo ao usuário autenticado.
-- Consulta paginada de repositórios, commits e diffs; filtro puro de arquivos por fronteira de segmento (`src/lib/commit-file-filter.ts`), sanitização de segredos em diffs (`src/lib/secret-sanitizer.ts`), backoff exponencial em leituras idempotentes e bloqueio contra coletas concorrentes.
-- Anotações manuais e importação de texto.
-- Geração e refinamento de rascunhos com Gemini (`x-goog-api-key`, timeout explícito via `AbortSignal.timeout`) e fallback automático para OpenAI, validados por schemas Zod em tempo de execução.
-- Edição, aprovação humana obrigatória e publicação pela API oficial do LinkedIn com credencial individual por usuário, reserva atômica (`aprovado` → `publicando`) e reconciliação idempotente.
-- Histórico de coletas e publicações, preferências com validação estrita de fusos IANA (`src/lib/timezone.ts`), observabilidade JSON estruturada sem segredos (`src/lib/observability.server.ts`) e temas claro/escuro.
+---
 
-Não há automação de navegador para publicar no LinkedIn. Toda publicação exige revisão e confirmação humana explícita.
+![Painel Principal — Diário para LinkedIn (Modo Escuro Editorial)](docs/screenshots/01-painel-diario-hero.png)
 
-## Fluxo atual (pós-Etapas 1 a 4)
+---
+
+## ✨ Visão Geral
+
+**Diário → LinkedIn** é uma aplicação full-stack de engenharia de software aplicada à IA construída com **TanStack Start (SSR)**, **React 19**, **TypeScript Estrito**, **Supabase (PostgreSQL + RLS)** e **Zod**. Ela automatiza a leitura do trabalho diário de pessoas desenvolvedoras no **GitHub**, filtra ruídos e segredos antes de qualquer chamada de LLM (**Google Gemini** com fallback automático para **OpenAI**) e estrutura um fluxo de **revisão, adaptação (re-rascunho) e aprovação humana obrigatória** antes de publicar pela **API oficial do LinkedIn (`/v2/ugcPosts`)**.
+
+> **Princípio Inegociável (Human-in-the-Loop):** Nenhuma automação de navegador é utilizada e nenhum texto jamais vai ao ar automaticamente. Toda publicação exige aprovação humana explícita vinculada à versão exata do texto e confirmação final em modal acessível.
+
+### Principais Pilares da Branch `melhoria/fundacao-testes`
+
+- **Coleta Paginada e Anti-Ruído do GitHub:** Varredura de repositórios e commits ordenados cronologicamente, descartando lockfiles, builds (`build/`, `dist/`, `node_modules/`), binários e arquivos sensíveis (`.env*`, `.pem`, `.key`, `id_rsa`) por fronteira de segmento (`src/lib/commit-file-filter.ts`).
+- **Sanitização Pré-Prompt de Segredos:** Mascaramento automático de chaves privadas PEM, tokens GitHub (`ghp_`/`gho_`), chaves OpenAI/Anthropic (`sk-`), Google (`AIza`), AWS (`AKIA`), Supabase (`sb_secret_`), JWTs e URLs autenticadas nos `git diffs` antes do envio à IA (`src/lib/secret-sanitizer.ts`).
+- **Camada de IA Resiliente e Validada com Zod:** Contratos estritos de entrada e saída (`summary`: 10–1.500 caracteres; `content`: 20–3.000 caracteres), chave enviada apenas via header `x-goog-api-key`, `AbortSignal.timeout` configurável e fallback transparente **Gemini → OpenAI** (`src/lib/ai.server.ts`).
+- **Rejeição Guiada e Re-Rascunho Adaptado:** Ao rejeitar um rascunho, o editor abre e foca automaticamente o painel **"Como podemos adaptar este rascunho? (Re-rascunho)"**, combinando a orientação da pessoa com a leitura original dos commits/diffs para gerar uma nova abordagem (`src/routes/rascunho.$id.tsx`).
+- **Reserva Atômica e Reconciliação no LinkedIn:** Transição Compare-And-Swap (`aprovado` → `publicando` → `publicado`) que bloqueia cliques concorrentes e impede postagens duplicadas em caso de timeout ou falha HTTP 5xx (`src/lib/linkedin.server.ts`).
+
+---
+
+## 📸 Tour Visual da Aplicação
+
+### 1. Painel Principal — Modo Escuro & Modo Claro (`Paper Grain`)
+
+O painel principal reúne a busca de commits em tempo real com barra de progresso por etapa, registro manual ou importação de arquivo (`.txt`, `.md`, `.csv`), seleção de estilo (`Profissional`, `Narrativo`, `Técnico`), fila de rascunhos e histórico de registros do dia.
+
+|                    Modo Escuro Editorial                     |                 Modo Claro (`Paper Grain`)                 |
+| :----------------------------------------------------------: | :--------------------------------------------------------: |
+| ![Painel Escuro](docs/screenshots/01-painel-diario-hero.png) | ![Painel Claro](docs/screenshots/02-painel-modo-claro.png) |
+
+---
+
+### 2. Revisão Humana Obrigatória e Trava de Publicação (`/rascunho/$id`)
+
+Na tela de revisão, o botão **"Publicar agora"** nasce **desabilitado**. Caso o usuário edite qualquer caractere do texto, uma nova aprovação explícita (**"Aprovar este texto"**) é exigida antes de liberar o modal de confirmação final. Textos com menos de `20` ou mais de `3.000` caracteres são bloqueados pela validação de domínio.
+
+![Revisão e Aprovação Humana](docs/screenshots/04-revisao-aprovacao-humana.png)
+
+---
+
+### 3. Rejeição com Adaptação Guiada (Re-Rascunho) e Nova Leitura de Commits
+
+Quando o usuário clica em **"Rejeitar"**:
+
+1. Os commits vistos daquele ciclo são liberados para permitir uma nova busca com abordagem diferente no menu principal;
+2. O card **"Como podemos adaptar este rascunho? (Re-rascunho)"** é destacado e focado automaticamente;
+3. O botão **"Fazer re-rascunho com base nisso"** cruza a orientação digitada com a leitura original dos commits/diffs salvos em `day_entries.raw_notes`, gerando uma nova versão e retornando o status para **"Aguardando sua revisão"**.
+
+![Fluxo de Rejeição e Re-rascunho Adaptado](docs/screenshots/05-rejeicao-e-rerascunho.png)
+
+---
+
+### 4. Conexão OAuth com GitHub (`/fontes`) e Central de Publicações LinkedIn (`/publicacoes`)
+
+- **Em `/fontes`:** A autorização OAuth com o GitHub utiliza `state` assinado com `HMAC-SHA256` (comparação em tempo constante `timingSafeEqual`, vínculo estrito ao `userId` e TTL de 10 minutos) e armazena o token criptografado com `AES-256-GCM`.
+- **Em `/publicacoes`:** Lista os textos aprovados prontos para envio e o histórico de publicações com consulta em tempo real do estado do post na API oficial do LinkedIn (**"Publicado e visível"**).
+
+|               Conexão GitHub OAuth (`/fontes`)                |              Publicações e Status no LinkedIn (`/publicacoes`)               |
+| :-----------------------------------------------------------: | :--------------------------------------------------------------------------: |
+| ![Fontes GitHub](docs/screenshots/03-fontes-github-oauth.png) | ![Publicações LinkedIn](docs/screenshots/06-publicacoes-status-linkedin.png) |
+
+---
+
+### 5. Configurações com Fusos IANA Validados (`/configuracoes`) e Histórico de Coletas (`/coletas`)
+
+- **Em `/configuracoes`:** Controle de horário diário, validação real de fusos horários IANA via `Intl.DateTimeFormat` (`America/Bahia`, `America/Sao_Paulo`, `America/Manaus`, `America/Recife`, `America/Fortaleza`, `UTC`), tom padrão e limite de commits por dia.
+- **Em `/coletas`:** Auditoria visual de cada execução manual ou agendada (`cron`), exibindo horário, repositórios varridos, commits processados e status final.
+
+|           Configurações e Fusos IANA (`/configuracoes`)            |                Histórico de Execuções (`/coletas`)                 |
+| :----------------------------------------------------------------: | :----------------------------------------------------------------: |
+| ![Configurações](docs/screenshots/07-configuracoes-fusos-iana.png) | ![Histórico de Coletas](docs/screenshots/08-historico-coletas.png) |
+
+---
+
+## 🏗️ Arquitetura do Sistema
 
 ```mermaid
-flowchart LR
-  A["GitHub (paginado + backoff)"] --> B["Coleta com bloqueio de concorrência"]
-  B --> C["Filtro de ruído/segredos + sanitização de diffs"]
-  C --> D["Gemini ou fallback OpenAI (validado com Zod)"]
-  D --> E["Persistência de day_entries e post_drafts"]
-  E --> F["Confirmação tardia em lote de seen_commits"]
-  F --> G["Revisão e aprovação humana obrigatória"]
-  G --> H["Reserva atômica (publicando) + API oficial do LinkedIn"]
+flowchart TB
+  subgraph Cliente["Camada de Interface (React 19 + TanStack Router/Query)"]
+    UI_Auth["/auth — Login + Sondagem Prévia OAuth"]
+    UI_Home["/ — Diário, Importação .md/.txt e Progresso de Coleta"]
+    UI_Draft["/rascunho/$id — Editor, Re-rascunho Pós-Rejeição e Aprovação Humana"]
+    UI_Pub["/publicacoes — Confirmação Final e Status LinkedIn"]
+    UI_Cfg["/fontes · /configuracoes · /coletas"]
+  end
+
+  subgraph Servidor["Camada de Servidor (TanStack Start Server Functions + SSR)"]
+    MW["requireSupabaseAuth + Isolamento Multiusuário (user_id)"]
+    Collect["collect.server.ts — Paginação, Lock Concorrente e Backoff"]
+    Filter["commit-file-filter.ts + secret-sanitizer.ts"]
+    AI["ai.server.ts + prompts.ts — Schemas Zod, Timeout e Fallback"]
+    Crypto["connectionKeyCrypto.server.ts (AES-256-GCM) + oauthState.server.ts (HMAC-SHA256)"]
+    LI["linkedin.server.ts — Reserva Atômica CAS e Reconciliação"]
+    Cron["cron.server.ts + timezone.ts — Validação IANA e Execução Segura"]
+    Obs["observability.server.ts — Logs JSON Estruturados sem Segredos"]
+  end
+
+  subgraph Externos["Persistência e Provedores Externos"]
+    DB[("Supabase PostgreSQL + RLS")]
+    GH["GitHub REST API v3"]
+    LLM["Google Gemini API / OpenAI API"]
+    LI_API["LinkedIn Official UGC API (/v2/ugcPosts)"]
+  end
+
+  Cliente --> MW
+  MW --> Collect & AI & LI & Crypto
+  Collect --> GH
+  Collect --> Filter --> AI --> LLM
+  Collect --> DB
+  LI --> LI_API & DB
+  Cron --> Collect
+  Collect & AI & Cron --> Obs
 ```
 
-## Tecnologias e organização
+### Mapa de Módulos do Repositório
 
-TypeScript, React, TanStack Start, Vite, Tailwind, Supabase/PostgreSQL, Zod, Vitest, Playwright e chamadas HTTP às APIs GitHub, LinkedIn e LLMs. As versões efetivas das dependências estão em `package-lock.json`.
+| Caminho                                                                                           | Responsabilidade Principal                                                                                                                              |
+| ------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [`src/lib/commit-file-filter.ts`](src/lib/commit-file-filter.ts)                                  | Filtro puro anti-ruído e anti-arquivos sensíveis ancorado por fronteiras de segmento (`build/` vs `rebuild/`).                                          |
+| [`src/lib/secret-sanitizer.ts`](src/lib/secret-sanitizer.ts)                                      | Sanitizador de segredos em `git diffs`, mensagens de commit e logs operacionais (8 famílias de credenciais).                                            |
+| [`src/lib/ai.server.ts`](src/lib/ai.server.ts)                                                    | Cliente HTTP de IA com validação Zod (`EntradaChamadaIASchema`, `SaidaRascunhoIASchema`), `x-goog-api-key`, timeout e fallback Gemini → OpenAI.         |
+| [`src/lib/prompts.ts`](src/lib/prompts.ts)                                                        | Construção pura de prompts de coleta, anotação manual e refinamento/re-rascunho nos tons `profissional`, `narrativo` e `tecnico`.                       |
+| [`src/lib/connectionKeyCrypto.server.ts`](src/lib/connectionKeyCrypto.server.ts)                  | Criptografia autenticada `AES-256-GCM` com validação estrita de `ENCRYPTION_SECRET` de 32 bytes em base64.                                              |
+| [`src/lib/oauthState.server.ts`](src/lib/oauthState.server.ts)                                    | Geração e validação em tempo constante (`timingSafeEqual`) do `state` OAuth assinado com `HMAC-SHA256`, TTL e vínculo ao `userId`.                      |
+| [`src/lib/collect.server.ts`](src/lib/collect.server.ts)                                          | Orquestrador de coleta do GitHub: bloqueio de concorrência, paginação cronológica, backoff exponencial e confirmação tardia de `seen_commits`.          |
+| [`src/lib/linkedin.server.ts`](src/lib/linkedin.server.ts)                                        | Publicação com credencial individual por usuário, reserva atômica Compare-And-Swap (`aprovado` → `publicando`) e reconciliação idempotente.             |
+| [`src/lib/timezone.ts`](src/lib/timezone.ts) & [`src/lib/cron.server.ts`](src/lib/cron.server.ts) | Validação real de fusos IANA (`Intl.DateTimeFormat`), autenticação de cron em tempo constante e avanço de `last_run_date` restrito a `status === "ok"`. |
+| [`src/lib/observability.server.ts`](src/lib/observability.server.ts)                              | Emissão de eventos operacionais JSON de linha única com redação automática de segredos.                                                                 |
+| [`src/lib/websocket-compat.ts`](src/lib/websocket-compat.ts)                                      | Compatibilidade de inicialização do `@supabase/supabase-js` em runtimes Node.js 20 sem `globalThis.WebSocket` nativo.                                   |
 
-| Diretório                    | Responsabilidade                                                                                                             |
-| ---------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| `src/routes/`                | Telas e endpoint de coleta agendada                                                                                          |
-| `src/lib/`                   | Coleta, filtro, sanitização, IA, prompts, fuso IANA, cron, observabilidade, credenciais e publicação                         |
-| `src/integrations/supabase/` | Clientes, autenticação e tipos do banco                                                                                      |
-| `src/components/`            | Componentes compartilhados                                                                                                   |
-| `tests/unit/`                | Testes unitários de filtro, prompts, segurança, integridade, concorrência, cron, observabilidade e compatibilidade WebSocket |
-| `tests/integration/`         | Testes de integração da camada de IA com HTTP simulado                                                                       |
-| `tests/e2e/`                 | Testes ponta a ponta (Playwright) com servidor local de serviços simulados                                                   |
-| `supabase/migrations/`       | Estrutura e políticas declaradas do banco                                                                                    |
-| `docs/`                      | Planejamento, relatórios de verificação por etapa e auditorias                                                               |
+---
 
-Interface e documentação próprias usam português. Identificadores técnicos, tabelas, contratos de APIs e arquivos gerados preservam os nomes existentes.
+## 🔧 Melhorias de Engenharia no Código (Branch `melhoria/fundacao-testes`)
 
-## Execução local
+Abaixo estão as **10 evoluções estruturais de código** implementadas sobre a versão experimental `0.1.0`, com comparativo direto do comportamento **Antes (`0.1.0`) vs. Depois (`melhoria/fundacao-testes`)**:
 
-1. Instale uma versão de Node compatível com os `engines` das dependências travadas (recomendado Node.js 22 LTS ou superior; compatibilidade com Node.js 20 assegurada por `src/lib/websocket-compat.ts`).
-2. Execute `npm ci`.
-3. Copie `.env.example` para `.env` e preencha os valores localmente. Nunca envie esse arquivo ao Git.
-4. Configure um projeto Supabase de desenvolvimento e aplique as migrações com revisão; a aplicação não provisiona o banco ao iniciar.
-5. Configure as URLs de redirecionamento e os provedores utilizados. Na visualização local padrão, a origem é `http://localhost:5173` e o retorno GitHub é `/oauth/github/return`.
-6. Execute `npm run dev` e use o endereço informado no terminal.
+### 1. Filtro de Arquivos Puro com Fronteira de Segmento e Bloqueio de Segredos (`F01`, `S04`)
 
-### Configuração e segredos
+- **Antes (`0.1.0`):** O filtro ficava acoplado dentro de `collect.server.ts`, aceitava strings vazias e usava busca por substring simples (`path.includes("build")`), descartando incorretamente arquivos de código legítimos como `src/rebuild/app.ts` ou `src/prebuild/setup.ts`. Além disso, não filtrava arquivos `.env` ou chaves privadas `.pem`/`.key`.
+- **Depois ([`src/lib/commit-file-filter.ts`](src/lib/commit-file-filter.ts)):** Extraído para módulo puro 100% testado, normalizando separadores Windows (`\`), rejeitando entradas vazias, aplicando regex com fronteira de diretório `(^|\/)build\/` e bloqueando `.env*` reais (preservando `.env.example`/`.template`), `*.pem`, `*.key`, `id_rsa`, `id_ed25519` e `credentials.json`.
 
-- `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` e suas variantes `VITE_` são configurações do cliente/servidor.
-- `SUPABASE_SERVICE_ROLE_KEY`, credenciais OAuth, chaves de IA e `ENCRYPTION_SECRET` pertencem exclusivamente ao servidor.
-- Nunca coloque segredos em variáveis `VITE_`: elas podem integrar o pacote do navegador.
-- `ENCRYPTION_SECRET` é **obrigatória** e deve conter exatamente 32 bytes codificados em base64 (não existe chave fixa de fallback).
-- Os modelos padrão são `gemini-3.8-flash` (sobrescrevível via `GEMINI_MODEL`, ex.: `gemini-3.5-flash-lite`) e `gpt-4o-mini` (via `OPENAI_MODEL`); o tempo limite é configurável por `AI_TIMEOUT_MS` (padrão `30000`).
-- Cada usuário utiliza exclusivamente sua própria credencial do LinkedIn armazenada criptografada em `app_user_connections` (não há token global compartilhado).
-- `.env.example` contém somente exemplos. Ambientes, chaves privadas, builds e artefatos locais permanecem fora do Git.
+```typescript
+// src/lib/commit-file-filter.ts
+const PADROES_DIRETORIOS_IGNORADOS: ReadonlyArray<RegExp> = [
+  /(^|\/)node_modules\//,
+  /(^|\/)dist\//,
+  /(^|\/)build\//, // Bloqueia "build/app.js", mas preserva "src/rebuild/app.ts"
+  /(^|\/)\.next\//,
+  /(^|\/)coverage\//,
+];
 
-## Verificações
-
-```sh
-npm test
-npm run test:e2e
-npm run typecheck
-npm run lint
-npm run build
+const PADROES_ARQUIVOS_SENSIVEIS: ReadonlyArray<RegExp> = [
+  /(^|\/)\.env(?:\.(?!example$|sample$|template$)[^/]+)?$/i,
+  /\.(pem|key|p12|pfx|keystore|jks)$/i,
+  /(^|\/)(id_rsa|id_ed25519|credentials\.json|service-account[^/]*\.json)$/i,
+];
 ```
 
-## Progresso e Relatórios Verificados na Branch (`melhoria/fundacao-testes`)
+---
 
-### Etapa 1 — Fundação de Qualidade (Concluída e Verificada)
+### 2. Confirmação Tardia em Lote de `seen_commits` Pós-Persistência (`D01`, `D03`)
 
-Registro detalhado em [docs/VERIFICACAO_ETAPA1.md](docs/VERIFICACAO_ETAPA1.md).
+- **Antes (`0.1.0`):** Cada commit era inserido na tabela `seen_commits` _durante_ a leitura dos diffs, antes de chamar a IA e antes de gravar o rascunho. Se a API da IA desse timeout ou o banco falhasse ao salvar `post_drafts`, os commits já ficavam marcados como vistos e eram perdidos silenciosamente nas coletas seguintes. Além disso, os `.update()` finais em `collection_runs` não verificavam erro de banco.
+- **Depois ([`src/lib/collect.server.ts`](src/lib/collect.server.ts)):** Os commits lidos ficam apenas em memória (`commitsConfirmadosParaMarcar`) e só são gravados em `seen_commits` na **etapa 10**, estritamente após o `insert` confirmado de `day_entries` e `post_drafts`. Todos os 4 caminhos terminais de `collection_runs` verificam `if (erroFinal) throw new Error(...)`.
 
-- **Framework de testes:** Vitest `4.1.12` (validado via Context7) em `vitest.config.ts` isolado dos plugins SSR, com scripts `test`, `test:watch` e `typecheck`.
-- **Extração e correção do filtro (`F01`):** `deveIncluirArquivo` extraído para módulo puro (`src/lib/commit-file-filter.ts`), ancorado por fronteira de segmento (`(^|\/)build\/`, `(^|\/)dist\/`, lockfiles), normalizando `\` e rejeitando entradas vazias.
-- **Integridade de persistência (`D03` — terminais da coleta):** Restaurada a checagem de erro de banco nos 4 caminhos terminais de `collectForUser` (autenticação, zero commits, erro na IA e sucesso) e na atualização de `since_at`, coberta por testes de regressão em `tests/unit/collect-persistence.test.ts`.
-- **Regularização do Lint (`Q01`):** Corrigidos `prefer-const` (`src/routes/fontes.tsx`), aviso de `useEffect` (`src/routes/configuracoes.tsx`) e 492 erros de formatação Prettier sem desativar nenhuma regra do ESLint.
+```typescript
+// src/lib/collect.server.ts (Linhas 820-850)
+const { data: entradaDiaria, error: erroEntrada } = await supabaseAdmin
+  .from("day_entries")
+  .insert({
+    user_id: idUsuario,
+    entry_date: dataHoje,
+    raw_notes: leituraOriginalCommits,
+    source: "github",
+  })
+  .select("id")
+  .single();
+if (erroEntrada) throw erroEntrada;
 
-### Etapa 2 — Camada de IA Confiável (Concluída e Verificada)
+const { data: rascunho, error: erroRascunho } = await supabaseAdmin
+  .from("post_drafts")
+  .insert({
+    user_id: idUsuario,
+    day_entry_id: entradaDiaria.id,
+    summary: sinteseIA.summary,
+    content: sinteseIA.content,
+    tone: promptColeta.tomAplicado,
+    status: "rascunho",
+  })
+  .select("id")
+  .single();
+if (erroRascunho) throw erroRascunho;
 
-Registro detalhado em [docs/VERIFICACAO_ETAPA2.md](docs/VERIFICACAO_ETAPA2.md).
+// Somente após day_entries e post_drafts estarem salvos confirmamos seen_commits em lote:
+await registrarCommitsProcessadosEmLote(supabaseAdmin, idUsuario, commitsConfirmadosParaMarcar);
+```
 
-- **Schemas em execução (`IA01`):** Validação Zod de entrada e saída (`summary`: 10–1.500 chars; `content`: 20–3.000 chars) em `src/lib/ai.server.ts`, rejeitando JSON inválido ou respostas vazias antes do banco/UI.
-- **Resiliência e segurança (`IA02`):** Timeout explícito via `AbortSignal.timeout` (padrão 30s / `AI_TIMEOUT_MS`), chave do Gemini movida da URL para o cabeçalho `x-goog-api-key`, modelo padrão atualizado (`gemini-3.8-flash`) e fallback automático **Gemini → OpenAI** testado em `tests/integration/ai.server.test.ts` (sem cobrança de APIs).
-- **Prompts e tons (`IA03` e `T01`):** Módulo puro `src/lib/prompts.ts` separando o roadmap interno dos prompts de post, aplicando o tom configurado pelo usuário na coleta automática e alinhando `TomDeVoz` (`profissional | narrativo | tecnico`).
+---
 
-### Etapa 3 — Automação, Segurança, Integridade, Observabilidade e CI (Concluída e Verificada)
+### 3. Paginação Cronológica e Preservação de Excedentes (`D02`) e Bloqueio de Concorrência
 
-Registros detalhados em [docs/VERIFICACAO_ETAPA3_1.md](docs/VERIFICACAO_ETAPA3_1.md) e [docs/VERIFICACAO_ETAPA3_COMPLETA.md](docs/VERIFICACAO_ETAPA3_COMPLETA.md).
+- **Antes (`0.1.0`):** Buscava apenas a 1ª página e avançava `until_at = inicioExecucao` mesmo quando `max_commits_per_day` truncava commits excedentes — deixando os commits não processados daquele intervalo para trás na coleta seguinte.
+- **Depois ([`src/lib/collect.server.ts`](src/lib/collect.server.ts)):** Pagina repositórios e commits, ordena do mais antigo ao mais recente (`ta - tb`), bloqueia coletas simultâneas para o mesmo usuário e mantém `until_at = desdeQuando` sempre que `commitsPendentes > 0`.
 
-- **Subetapa 3.1 — Segurança e Isolamento (`S01`, `S02`, `S03`, `S04`, `U02`):**
-  - `ENCRYPTION_SECRET` obrigatória de 32 bytes em base64 (`src/lib/connectionKeyCrypto.server.ts`).
-  - OAuth GitHub com `state` assinado via `HMAC-SHA256`, comparação em tempo constante (`timingSafeEqual`), TTL de 10 minutos e vínculo ao `userId` (`src/lib/oauthState.server.ts`).
-  - Credencial LinkedIn estritamente individual por usuário (`src/lib/linkedin.server.ts`), sem fallback de token global.
-  - Bloqueio de arquivos sensíveis (`.env*`, `.pem`, `.key`, `id_rsa`, `credentials.json`) e mascaramento de segredos em diffs antes do envio à IA (`src/lib/secret-sanitizer.ts`).
-  - Filtros `.eq("user_id", userId)` e chaves de cache (`queryKey`) isoladas por `userId`.
-- **Subetapa 3.2 — Integridade de Dados, Paginação e Concorrência (`D01`, `D02`, `P01`):**
-  - Gravação de `seen_commits` em lote **somente após** a confirmação de `day_entries` e `post_drafts` (`D01`).
-  - Paginação de repositórios e commits ordenados do mais antigo ao mais recente, preservando `until_at = desdeQuando` quando `max_commits_per_day` trunca excedentes e bloqueando coletas concorrentes para o mesmo usuário (`D02`).
-  - Reserva atômica de publicação (`aprovado` → `publicando`), reconciliação idempotente quando `linkedin_post_id` já existe, reversão segura apenas em erros 4xx anteriores à criação e retenção em `publicando` em falhas incertas (timeout / 5xx) (`P01`).
-- **Subetapa 3.3 — Execução Confiável, Fusos IANA e Cron (`A01`, `A02`):**
-  - Validação IANA real com `Intl.DateTimeFormat` (`src/lib/timezone.ts`), substituição de `America/Rio_de_Janeiro` por `America/Sao_Paulo` e validação Zod no servidor (`A02`).
-  - Execução agendada (`src/lib/cron.server.ts`) com autenticação em tempo constante e avanço de `last_run_date` exclusivamente quando `result.status === "ok"` (`A01`), além de backoff exponencial limitado em leituras idempotentes do GitHub.
-- **Subetapa 3.4 — Observabilidade Estruturada sem Segredos:**
-  - Eventos operacionais em JSON de linha única (`src/lib/observability.server.ts`) com `runId`, `userId`, `status`, `duracaoMs`, contagens, `provedorIA`, `modeloIA` e `latenciaIAMs`, redigindo credenciais automaticamente.
-- **Subetapa 3.5 — Pipeline de CI:**
-  - Workflow `.github/workflows/ci.yml` em Node.js 22 LTS executando `npm ci`, `npm run lint`, `npm run typecheck`, `npm test`, `npm run build` e `npm run test:e2e` com upload de artefatos.
+---
 
-### Etapa 4 — Interface, Revisão Humana e Testes E2E com Playwright (Concluída e Verificada)
+### 4. Camada de IA com Schemas Zod, Header `x-goog-api-key`, Timeout e Fallback Gemini → OpenAI (`IA01`, `IA02`, `IA03`, `T01`)
 
-Registro detalhado em [docs/VERIFICACAO_ETAPA4.md](docs/VERIFICACAO_ETAPA4.md).
+- **Antes (`0.1.0`):** Passava a chave do Gemini na query string da URL (`?key=...`), não possuía `AbortSignal.timeout`, não fazia fallback para a OpenAI se o Gemini retornasse HTTP 500/429 ou JSON quebrado, salvava texto bruto caso o `JSON.parse` falhasse e misturava o roadmap interno do projeto dentro do prompt de geração de posts.
+- **Depois ([`src/lib/ai.server.ts`](src/lib/ai.server.ts) e [`src/lib/prompts.ts`](src/lib/prompts.ts)):**
+  - Valida entradas e saídas com `EntradaChamadaIASchema` e `SaidaRascunhoIASchema` (`summary` 10–1.500 chars; `content` 20–3.000 chars);
+  - Envia a chave exclusivamente via cabeçalho HTTP `"x-goog-api-key"`;
+  - Aplica `AbortSignal.timeout(timeoutMs)` (padrão 30s, configurável via `AI_TIMEOUT_MS`);
+  - Executa fallback automático **Gemini → OpenAI** em qualquer falha HTTP, timeout ou resposta JSON inválida;
+  - Separa os prompts em `src/lib/prompts.ts`, aplicando o tom configurado pelo usuário (`profissional | narrativo | tecnico`).
 
-- **Suíte E2E isolada (`playwright.config.ts`, `tests/e2e/`):** Servidor local determinístico (`tests/e2e/helpers/mock-services-server.mjs`) simulando Supabase Auth/PostgREST com RLS, GitHub, Gemini e LinkedIn UGC API sem chamadas externas, sem cobrança e sem publicar em contas reais.
-- **Cobertura ponta a ponta e QA Exploratório (`tests/e2e/fluxo-principal.spec.ts`, `tests/e2e/qa-exploratorio.spec.ts`):** Autenticação e proteção de todas as 6 rotas privadas, página 404, coleta do GitHub, revisão/edição de rascunho com bloqueio do botão `"Publicar agora"` até aprovação humana explícita (`"Aprovar este texto"`), bloqueio de aprovação para texto `< 20` ou `> 3.000` caracteres, salvamento intermediário e rejeição de rascunho, modal de confirmação (`alertdialog`), publicação simulada, consulta de status em `/publicacoes`, criação manual, importação de arquivo `.md`, refinamento iterativo com feedback, tratamento resiliente de falha HTTP 500 da IA, erros de retorno OAuth em `/oauth/github/return`, desconexão de GitHub em `/fontes`, alternância de tema claro/escuro, responsividade mobile (`375x667` sem overflow horizontal) e isolamento total de dados na troca de usuário (`Ana` → `Bruno`).
-- **Compatibilidade WebSocket em Node.js 20 (`src/lib/websocket-compat.ts`):** Correção de regressão detectada pelos testes E2E onde `@supabase/realtime-js` exigia `globalThis.WebSocket` ao instanciar `createClient` no servidor em Node.js 20.
+---
 
-### Evidências Consolidadas na Branch
+### 5. Criptografia Obrigatória de 32 Bytes (`S01`) e OAuth `state` Assinado com HMAC-SHA256 (`S02`)
 
-| Verificação                           | Comando             | Resultado Atual                                                                  |
-| ------------------------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| **Testes Unitários + Integração**     | `npm test`          | ✅ **56/56 passando** (8 arquivos em `tests/unit/` e `tests/integration/`)       |
-| **Testes Ponta a Ponta (Playwright)** | `npm run test:e2e`  | ✅ **8/8 cenários E2E + QA Exploratório passando** (Chromium + servidor isolado) |
-| **TypeScript Estrito**                | `npm run typecheck` | ✅ **0 erros**                                                                   |
-| **ESLint + Prettier**                 | `npm run lint`      | ✅ **0 erros** _(7 avisos padrão do shadcn/ui `react-refresh`)_                  |
-| **Build de Produção**                 | `npm run build`     | ✅ **Compilado** (cliente + servidor)                                            |
-| **Higiene de Diff**                   | `git diff --check`  | ✅ **0 problemas**                                                               |
+- **Antes (`0.1.0`):** `connectionKeyCrypto.server.ts` continha uma chave fixa de fallback (`"0123456789abcdef..."`) caso `ENCRYPTION_SECRET` estivesse ausente, e o retorno OAuth do GitHub (`/oauth/github/return`) trocava o `code` sem validar o parâmetro `state` (vulnerável a CSRF e vinculação de conta GitHub trocada).
+- **Depois ([`src/lib/connectionKeyCrypto.server.ts`](src/lib/connectionKeyCrypto.server.ts) e [`src/lib/oauthState.server.ts`](src/lib/oauthState.server.ts)):**
+  - `obterChaveMestraCriptografia()` exige `ENCRYPTION_SECRET` com exatos 32 bytes após decodificação base64 (zero fallback fixo);
+  - `gerarStateOAuth` e `validarStateOAuth` assinam `{ userId, ts, nonce }` com `HMAC-SHA256`, verificam com `timingSafeEqual`, exigem correspondência estrita com o `userId` autenticado e expiram em 10 minutos.
 
-Os registros históricos da preparação inicial `0.1.0` permanecem preservados em [docs/VERIFICACAO_0.1.0.md](docs/VERIFICACAO_0.1.0.md) e [docs/AUDITORIAS_0.1.0.md](docs/AUDITORIAS_0.1.0.md). Os pareceres das duas auditorias independentes (Conformidade e Adversarial) que aprovaram as Etapas 1 a 4 no Gate Global da Fase 6 estão registrados em [docs/AUDITORIAS_ETAPAS_1_A_4.md](docs/AUDITORIAS_ETAPAS_1_A_4.md).
+---
 
-## Acompanhamento de Problemas e Limitações (Desde a 0.1.0)
+### 6. Reserva Atômica Compare-And-Swap e Credencial Individual no LinkedIn (`S03`, `P01`)
 
-| ID   | Prioridade            | Problema observado na 0.1.0                                                | Status na branch `melhoria/fundacao-testes`                                                                    |
-| ---- | --------------------- | -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Q01  | Alta                  | Lint reprovado e ausência de testes                                        | ✅ **Resolvido nas Etapas 1 e 4** (56 testes Vitest + 4 fluxos E2E Playwright + 0 erros de lint)               |
-| F01  | Média                 | Filtro rejeita `src/rebuild/app.ts` por substring; entrada vazia aceita    | ✅ **Resolvido nas Etapas 1–2** (`commit-file-filter.ts` + testes)                                             |
-| IA01 | Alta                  | Saída da IA sem validação em execução; JSON inválido virava texto          | ✅ **Resolvido na Etapa 2** (schemas Zod + `ErroCamadaIA`)                                                     |
-| IA02 | Alta                  | Falha Gemini não aciona OpenAI; timeout explícito ausente                  | ✅ **Resolvido na Etapa 2** (`AbortSignal.timeout` + fallback)                                                 |
-| IA03 | Média                 | Prompt inclui roadmap fixo e tom da coleta não orientava geração           | ✅ **Resolvido na Etapa 2** (`src/lib/prompts.ts`)                                                             |
-| T01  | Média                 | Tipos de domínio e contratos de tons divergiam                             | ✅ **Resolvido na Etapa 2** (`TomDeVoz` unificado)                                                             |
-| S01  | Crítica para produção | Chave de criptografia fixa se o ambiente estiver incompleto                | ✅ **Resolvido na Subetapa 3.1** (`ENCRYPTION_SECRET` 32B obrigatória)                                         |
-| S02  | Alta                  | OAuth GitHub não valida o `state` de retorno                               | ✅ **Resolvido na Subetapa 3.1** (`oauthState.server.ts` HMAC + TTL)                                           |
-| S03  | Alta                  | Token LinkedIn global pode ser usado por outro usuário                     | ✅ **Resolvido na Subetapa 3.1** (`obterTokenLinkedInDoUsuario` em `linkedin.server.ts`)                       |
-| S04  | Alta                  | Filtro de ruído não é filtro de segredos                                   | ✅ **Resolvido na Subetapa 3.1** (`secret-sanitizer.ts` + filtro `.env`/`.pem`)                                |
-| U02  | Média                 | Cache de algumas consultas não inclui usuário                              | ✅ **Resolvido na Subetapa 3.1 + Etapa 4** (`userId` nas `queryKey`s, queries e teste E2E de troca de sessão)  |
-| D03  | Alta                  | Gravações e conclusão de execução ignoravam alguns erros                   | ✅ **Resolvido nas Etapas 1 e 3.1** (caminhos terminais, conexões e publicação verificados)                    |
-| D01  | Alta                  | Commits marcados antes de salvar rascunho                                  | ✅ **Resolvido na Subetapa 3.2** (confirmação tardia em lote de `seen_commits` pós-persistência)               |
-| D02  | Alta                  | Paginação limitada e marco temporal global podem deixar commits para trás  | ✅ **Resolvido na Subetapa 3.2** (paginação, ordenação cronológica e preservação de `until_at` com excedentes) |
-| P01  | Alta                  | Publicação sem reserva atômica; erro ao salvar resultado pode ser ignorado | ✅ **Resolvido na Subetapa 3.2** (reserva atômica `aprovado` → `publicando` e reconciliação idempotente)       |
-| A01  | Alta                  | Cron marca o dia mesmo após resultado de erro                              | ✅ **Resolvido na Subetapa 3.3** (`cron.server.ts` avança `last_run_date` apenas quando `status === "ok"`)     |
-| A02  | Alta                  | Fuso `America/Rio_de_Janeiro` inválido e cálculos de data inconsistentes   | ✅ **Resolvido na Subetapa 3.3** (`timezone.ts` com validação IANA via `Intl.DateTimeFormat`)                  |
-| U01  | Média                 | Preferências de notificação sem entrega implementada                       | ⏳ Evolução posterior de produto (fora do escopo das Etapas 1–4 conforme `roadmap.md`)                         |
+- **Antes (`0.1.0`):** Usava um fallback global `process.env.LINKEDIN_ACCESS_TOKEN` (permitindo que um usuário publicasse na conta global de outro) e enviava `POST /v2/ugcPosts` direto do status `"aprovado"` sem trava de concorrência.
+- **Depois ([`src/lib/linkedin.server.ts`](src/lib/linkedin.server.ts)):**
+  - `obterTokenLinkedInDoUsuario(userId)` lê exclusivamente a conexão individual do usuário em `app_user_connections`;
+  - Reconcilia de forma idempotente caso `linkedin_post_id` já exista;
+  - Executa reserva atômica `.update({ status: "publicando" }).eq("id", draft.id).eq("user_id", userId).eq("status", "aprovado").is("linkedin_post_id", null)` antes de chamar o LinkedIn;
+  - Reverte para `"aprovado"` apenas em falhas definidas anteriores à publicação (HTTP 4xx) e retém em `"publicando"` em falhas incertas (timeout / HTTP 5xx) para evitar duplicação.
 
-## Roteiro e versionamento
+---
 
-Leia [roadmap.md](roadmap.md) e [CHANGELOG.md](CHANGELOG.md).
+### 7. Fusos Horários IANA Reais (`A02`) e Proteção do Ciclo de Cron (`A01`)
+
+- **Antes (`0.1.0`):** Incluía o identificador inválido `America/Rio_de_Janeiro` (inexistente na base IANA) e o cron gravava `last_run_date = today` mesmo quando `collectForUser` retornava `status: "erro"`, impedindo novas tentativas no mesmo dia.
+- **Depois ([`src/lib/timezone.ts`](src/lib/timezone.ts) e [`src/lib/cron.server.ts`](src/lib/cron.server.ts)):**
+  - `ehFusoHorarioValido` valida via `Intl.DateTimeFormat`, migra automaticamente `America/Rio_de_Janeiro` → `America/Sao_Paulo` e protege `updateAutomationSettings` com Zod;
+  - `executarCicloCron` autentica o segredo em tempo constante (`SHA-256` + `timingSafeEqual`) e só atualiza `last_run_date` quando `result.status === "ok"`.
+
+---
+
+### 8. Isolamento Multiusuário Completo (`U02`) e Guardas em Todas as Rotas Privadas
+
+- **Antes (`0.1.0`):** Consultas e `queryKey`s do TanStack Query omitiam `userId`, e rotas como `/coletas`, `/fontes` e `/configuracoes` não redirecionavam visitantes deslogados para `/auth`.
+- **Depois:** Todas as queries e mutações incluem `.eq("user_id", userId)` e `userId` nas `queryKey`s, todas as 6 rotas privadas redirecionam para `/auth` quando não há sessão e [`src/routes/auth.tsx`](src/routes/auth.tsx) bloqueia submissão antes da hidratação SSR (`disabled={busy || loading}`) e sonda `/auth/v1/authorize` contra provedores OAuth sem `Client Secret`.
+
+---
+
+## 🛡️ Segurança e Integridade Operacional (Status dos Achados desde a `0.1.0`)
+
+| ID       | Prioridade | Problema Observado na Base `0.1.0`                                        | Solução Verificada na Branch `melhoria/fundacao-testes`                                                                                              |
+| -------- | ---------- | ------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Q01**  | Alta       | Lint reprovado (493 erros) e ausência de suíte de testes                  | ✅ **Resolvido:** 56 testes Vitest + 8 cenários E2E/QA Playwright + **0 erros** no ESLint/Prettier                                                   |
+| **F01**  | Média      | Filtro rejeitava `src/rebuild/app.ts` por substring; entrada vazia aceita | ✅ **Resolvido:** [`commit-file-filter.ts`](src/lib/commit-file-filter.ts) ancorado por fronteira de segmento                                        |
+| **IA01** | Alta       | Saída da IA sem validação em execução; JSON inválido virava texto         | ✅ **Resolvido:** Schemas Zod + `ErroCamadaIA` em [`ai.server.ts`](src/lib/ai.server.ts)                                                             |
+| **IA02** | Alta       | Falha Gemini não acionava OpenAI; timeout explícito ausente               | ✅ **Resolvido:** `AbortSignal.timeout` + fallback automático Gemini → OpenAI                                                                        |
+| **IA03** | Média      | Prompt incluía roadmap fixo e ignorava tom configurado na coleta          | ✅ **Resolvido:** Prompts desacoplados em [`prompts.ts`](src/lib/prompts.ts) com tom do usuário                                                      |
+| **T01**  | Média      | Tipos de domínio e contratos de tons divergiam                            | ✅ **Resolvido:** `TomDeVoz` unificado com alias retrocompatível `storytelling` → `narrativo`                                                        |
+| **S01**  | Crítica    | Chave de criptografia fixa se o ambiente estivesse incompleto             | ✅ **Resolvido:** `ENCRYPTION_SECRET` de 32 bytes obrigatória em [`connectionKeyCrypto.server.ts`](src/lib/connectionKeyCrypto.server.ts)            |
+| **S02**  | Alta       | OAuth GitHub não validava o `state` de retorno                            | ✅ **Resolvido:** [`oauthState.server.ts`](src/lib/oauthState.server.ts) com `HMAC-SHA256`, `timingSafeEqual` e TTL                                  |
+| **S03**  | Alta       | Token LinkedIn global podia ser usado por outro usuário                   | ✅ **Resolvido:** Credencial estritamente individual por usuário em [`linkedin.server.ts`](src/lib/linkedin.server.ts)                               |
+| **S04**  | Alta       | Filtro de ruído não filtrava arquivos sensíveis nem segredos em diffs     | ✅ **Resolvido:** [`secret-sanitizer.ts`](src/lib/secret-sanitizer.ts) + bloqueio de `.env*`, `.pem`, `.key`, `id_rsa`                               |
+| **U02**  | Média      | Cache e algumas consultas não isolavam `user_id`                          | ✅ **Resolvido:** `.eq("user_id", userId)` e `userId` nas `queryKey`s + teste E2E de troca de sessão                                                 |
+| **D01**  | Alta       | Commits marcados em `seen_commits` antes de salvar rascunho               | ✅ **Resolvido:** Confirmação tardia em lote de `seen_commits` somente após `day_entries` e `post_drafts`                                            |
+| **D02**  | Alta       | Paginação limitada e `until_at` global podiam deixar commits para trás    | ✅ **Resolvido:** Paginação cronológica e preservação de `until_at = desdeQuando` quando há excedentes                                               |
+| **D03**  | Alta       | Gravações terminais de `collection_runs` ignoravam erros do banco         | ✅ **Resolvido:** Verificação explícita nos 4 caminhos terminais coberta por [`collect-persistence.test.ts`](tests/unit/collect-persistence.test.ts) |
+| **P01**  | Alta       | Publicação sem reserva atômica e sem reconciliação de falhas incertas     | ✅ **Resolvido:** Reserva CAS `aprovado` → `publicando` e reconciliação idempotente em [`linkedin.server.ts`](src/lib/linkedin.server.ts)            |
+| **A01**  | Alta       | Cron marcava `last_run_date` mesmo após erro na coleta                    | ✅ **Resolvido:** [`cron.server.ts`](src/lib/cron.server.ts) atualiza `last_run_date` apenas quando `status === "ok"`                                |
+| **A02**  | Alta       | Fuso `America/Rio_de_Janeiro` inválido e datas inconsistentes             | ✅ **Resolvido:** [`timezone.ts`](src/lib/timezone.ts) com validação IANA real via `Intl.DateTimeFormat`                                             |
+
+---
+
+## 🧪 Suíte de Testes e QA Exploratório
+
+A qualidade da branch é assegurada por **64 testes automatizados** distribuídos em três camadas (Unitários, Integração e Ponta a Ponta / QA no navegador Chromium), além de pipeline GitHub Actions (`.github/workflows/ci.yml`) e duas auditorias independentes do Gate Global da Fase 6:
+
+| Camada                                          | Arquivos de Teste                                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Escopo Verificado                                                                                                                                                                                                                                                                                                                                                                                                                                            | Resultado              |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------- |
+| **Unitários (Vitest)**                          | [`commit-file-filter.test.ts`](tests/unit/commit-file-filter.test.ts)<br>[`collect-persistence.test.ts`](tests/unit/collect-persistence.test.ts)<br>[`prompts.test.ts`](tests/unit/prompts.test.ts)<br>[`security.test.ts`](tests/unit/security.test.ts)<br>[`integrity-concurrency.test.ts`](tests/unit/integrity-concurrency.test.ts)<br>[`execution-observability.test.ts`](tests/unit/execution-observability.test.ts)<br>[`websocket-compat.test.ts`](tests/unit/websocket-compat.test.ts) | Fronteiras de diretório (`build/` vs `rebuild/`), persistência nos 4 caminhos terminais, prompts e tons, criptografia AES-256-GCM, `state` OAuth HMAC-SHA256, sanitização de 8 famílias de segredos, confirmação tardia de `seen_commits`, corrida concorrente `Promise.allSettled` no LinkedIn, fusos IANA, cron e logs JSON sem segredos.                                                                                                                  | ✅ **46/46 aprovados** |
+| **Integração (Vitest)**                         | [`ai.server.test.ts`](tests/integration/ai.server.test.ts)                                                                                                                                                                                                                                                                                                                                                                                                                                      | Chamadas Gemini (`x-goog-api-key`), rejeição de JSON malformado/truncado ou fora dos limites (`< 20` / `> 3000` chars), timeout, fallback automático Gemini → OpenAI e falha dupla sem vazamento de chaves (zero cobrança de APIs reais).                                                                                                                                                                                                                    | ✅ **10/10 aprovados** |
+| **E2E + QA Exploratório (Playwright Chromium)** | [`fluxo-principal.spec.ts`](tests/e2e/fluxo-principal.spec.ts)<br>[`qa-exploratorio.spec.ts`](tests/e2e/qa-exploratorio.spec.ts)                                                                                                                                                                                                                                                                                                                                                                | Servidor local simulado (`mock-services-server.mjs`): login, proteção das 6 rotas privadas, bloqueio de OAuth sem secret, página 404, coleta GitHub, upload `.md`, aprovação humana obrigatória, rejeição + **re-rascunho adaptado**, nova busca com rascunhos variados, publicação simulada, status em `/publicacoes`, falha HTTP 500 da IA, tema claro/escuro, responsividade mobile (`375x667` sem overflow) e isolamento multiusuário (`Ana` → `Bruno`). | ✅ **8/8 aprovados**   |
+
+### Relatórios de Verificação e Auditoria por Etapa
+
+- 📄 [Etapa 1 — Fundação de Qualidade](docs/VERIFICACAO_ETAPA1.md)
+- 📄 [Etapa 2 — Camada de IA Confiável](docs/VERIFICACAO_ETAPA2.md)
+- 📄 [Etapa 3.1 — Segurança e Isolamento](docs/VERIFICACAO_ETAPA3_1.md)
+- 📄 [Etapa 3 Completa — Integridade, Execução, Observabilidade e CI](docs/VERIFICACAO_ETAPA3_COMPLETA.md)
+- 📄 [Etapa 4 — Interface, Revisão Humana e Suíte E2E / QA Playwright](docs/VERIFICACAO_ETAPA4.md)
+- 🛡️ [Gate Global da Fase 6 — Laudo das Duas Auditorias Independentes (Conformidade e Adversarial)](docs/AUDITORIAS_ETAPAS_1_A_4.md)
+
+---
+
+## 🚀 Como Executar Localmente
+
+### Pré-requisitos
+
+- **Node.js 22 LTS** ou superior (compatibilidade com Node.js 20 assegurada por `src/lib/websocket-compat.ts`).
+- Dependências instaladas via `npm ci`.
+
+### Opção 1 — Ambiente Local Auto-Contido (Demonstração Imediata com Simulador)
+
+Sobe o servidor de serviços simulados (Auth, PostgREST com RLS, OAuth GitHub, Gemini e LinkedIn) na porta `54328` junto com a aplicação na porta `5173`, sem precisar de chaves externas:
+
+```bash
+APP_PORT=5173 MOCK_PORT=54328 node tests/e2e/helpers/start-e2e-stack.mjs
+```
+
+Acesse **`http://localhost:5173/auth`** e entre com `henrique@exemplo.com` / `henrique123` (ou `ana@exemplo.com` / `senha-segura-ana`).
+
+### Opção 2 — Ambiente Conectado ao Supabase, GitHub e Gemini/OpenAI Reais
+
+1. Copie `.env.example` para `.env` (nunca versione o arquivo `.env`).
+2. Preencha `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `ENCRYPTION_SECRET` (32 bytes em base64), `GEMINI_API_KEY` (e/ou `OPENAI_API_KEY`), `GITHUB_CLIENT_ID` e `GITHUB_CLIENT_SECRET`.
+3. Aplique as migrações de `supabase/migrations/` no seu projeto Supabase e inicie o servidor:
+
+```bash
+npm run dev
+```
+
+### Comandos de Verificação de Qualidade
+
+```bash
+npm test              # Executa os 56 testes unitários e de integração (Vitest)
+npm run test:e2e      # Executa os 8 fluxos E2E e QA Exploratório no Chromium (Playwright)
+npm run typecheck     # Verifica tipagem estrita do TypeScript (tsc --noEmit)
+npm run lint          # Verifica ESLint e formatação Prettier (0 erros)
+npm run build         # Compila os bundles de cliente e servidor de produção
+```
+
+---
+
+## 🗺️ Roteiro e Próximos Passos
+
+Consulte [`roadmap.md`](roadmap.md) e [`CHANGELOG.md`](CHANGELOG.md). Com as **Etapas 1 a 4 concluídas e aprovadas no Gate Global**, o próximo marco arquitetural planejado é a **Etapa 5 (Orquestração com `@langchain/langgraph`)**, introduzindo grafo de estados com checkpoints por etapa, loop de autocorreção (`validar ↺ gerar`) e `interrupt()` nativo para revisão humana.
