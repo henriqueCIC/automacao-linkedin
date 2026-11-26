@@ -78,6 +78,13 @@ describe("callAi — camada de IA confiável (integração simulada)", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("rejeita prompts acima de 40 mil caracteres antes de consumir tokens", async () => {
+    process.env["GEMINI_API_KEY"] = "chave-gemini-ficticia";
+
+    await expect(callAi(SYSTEM_VALIDO, "a".repeat(40_001))).rejects.toThrow(/excedeu/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("lança erro claro quando nenhuma chave de IA está configurada", async () => {
     await expect(callAi(SYSTEM_VALIDO, USER_VALIDO)).rejects.toThrow(/Nenhuma chave de IA/i);
     expect(fetchMock).not.toHaveBeenCalled();
@@ -94,13 +101,44 @@ describe("callAi — camada de IA confiável (integração simulada)", () => {
 
     const [urlChamada, init] = fetchMock.mock.calls[0]!;
     const urlStr = String(urlChamada);
-    expect(urlStr).toContain("gemini-3.8-flash:generateContent");
+    expect(urlStr).toContain("gemini-3.5-flash-lite:generateContent");
     expect(urlStr).not.toContain("chave-secreta-gemini-123");
     expect(urlStr).not.toContain("?key=");
 
     const headers = new Headers(init?.headers);
     expect(headers.get("x-goog-api-key")).toBe("chave-secreta-gemini-123");
     expect(init?.signal).toBeDefined();
+  });
+
+  it("registra os tokens devolvidos pelo Gemini para controlar o orçamento", async () => {
+    process.env["GEMINI_API_KEY"] = "chave-gemini-ficticia";
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          candidates: [{ content: { parts: [{ text: JSON.stringify(RASCUNHO_VALIDO) }] } }],
+          usageMetadata: {
+            promptTokenCount: 100,
+            candidatesTokenCount: 30,
+            cachedContentTokenCount: 20,
+            thoughtsTokenCount: 10,
+            totalTokenCount: 140,
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await callAi(SYSTEM_VALIDO, USER_VALIDO);
+
+    const evento = JSON.parse(String(infoSpy.mock.calls.at(-1)?.[0]));
+    expect(evento).toMatchObject({
+      tokensEntradaIA: 100,
+      tokensSaidaIA: 30,
+      tokensCacheIA: 20,
+      tokensRaciocinioIA: 10,
+      tokensTotalIA: 140,
+    });
   });
 
   it("rejeita JSON inválido da IA em vez de salvar texto bruto como rascunho", async () => {
@@ -216,5 +254,36 @@ describe("callAi — camada de IA confiável (integração simulada)", () => {
     expect(String(urlChamada)).toContain("api.openai.com/v1/chat/completions");
     const headers = new Headers(init?.headers);
     expect(headers.get("Authorization")).toBe("Bearer sk-openai-unica");
+  });
+
+  it("registra tokens e cache devolvidos pela OpenAI", async () => {
+    process.env["OPENAI_API_KEY"] = "sk-openai-unica";
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(RASCUNHO_VALIDO) } }],
+          usage: {
+            prompt_tokens: 80,
+            completion_tokens: 25,
+            total_tokens: 105,
+            prompt_tokens_details: { cached_tokens: 50 },
+            completion_tokens_details: { reasoning_tokens: 5 },
+          },
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+
+    await callAi(SYSTEM_VALIDO, USER_VALIDO);
+
+    const evento = JSON.parse(String(infoSpy.mock.calls.at(-1)?.[0]));
+    expect(evento).toMatchObject({
+      tokensEntradaIA: 80,
+      tokensSaidaIA: 25,
+      tokensCacheIA: 50,
+      tokensRaciocinioIA: 5,
+      tokensTotalIA: 105,
+    });
   });
 });

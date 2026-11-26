@@ -14,7 +14,7 @@ import { z } from "zod";
 import { registrarEventoOperacional } from "./observability.server";
 
 /** Modelo padrão do Google Gemini conforme documentação oficial atual */
-export const MODELO_PADRAO_GEMINI = "gemini-3.8-flash";
+export const MODELO_PADRAO_GEMINI = "gemini-3.5-flash-lite";
 
 /** Modelo padrão da OpenAI com suporte a Structured Outputs (json_schema strict) */
 export const MODELO_PADRAO_OPENAI = "gpt-4o-mini";
@@ -27,7 +27,7 @@ export const LIMITES_CONTEUDO_IA = {
   systemMin: 10,
   systemMax: 12_000,
   userMin: 1,
-  userMax: 120_000,
+  userMax: 40_000,
   summaryMin: 10,
   summaryMax: 1_500,
   contentMin: 20,
@@ -100,6 +100,23 @@ export const SaidaRascunhoIASchema = z.object({
 });
 
 export type AiDraft = z.infer<typeof SaidaRascunhoIASchema>;
+
+interface UsoTokensIA {
+  tokensEntradaIA: number;
+  tokensSaidaIA: number;
+  tokensCacheIA: number;
+  tokensRaciocinioIA: number;
+  tokensTotalIA: number;
+}
+
+interface RespostaProvedorIA {
+  rascunho: AiDraft;
+  uso: UsoTokensIA;
+}
+
+function normalizarTokens(valor: unknown): number {
+  return Number.isFinite(Number(valor)) && Number(valor) > 0 ? Math.trunc(Number(valor)) : 0;
+}
 
 export interface OpcoesChamadaIA {
   /** Sobrescreve o tempo limite da chamada HTTP em milissegundos */
@@ -179,7 +196,7 @@ async function chamarGemini(
   system: string,
   user: string,
   timeoutMs: number,
-): Promise<AiDraft> {
+): Promise<RespostaProvedorIA> {
   const modelo = process.env["GEMINI_MODEL"]?.trim() || MODELO_PADRAO_GEMINI;
   const baseUrl =
     process.env["GEMINI_API_BASE_URL"]?.trim() || "https://generativelanguage.googleapis.com";
@@ -241,10 +258,26 @@ async function chamarGemini(
     );
   }
 
-  let payload: { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+  let payload: {
+    candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+    usageMetadata?: {
+      promptTokenCount?: number;
+      candidatesTokenCount?: number;
+      cachedContentTokenCount?: number;
+      thoughtsTokenCount?: number;
+      totalTokenCount?: number;
+    };
+  };
   try {
     payload = (await res.json()) as {
       candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+      usageMetadata?: {
+        promptTokenCount?: number;
+        candidatesTokenCount?: number;
+        cachedContentTokenCount?: number;
+        thoughtsTokenCount?: number;
+        totalTokenCount?: number;
+      };
     };
   } catch {
     throw new ErroCamadaIA(
@@ -255,7 +288,17 @@ async function chamarGemini(
   }
 
   const textoBruto = payload.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-  return validarSaidaTextoJson(textoBruto, "gemini");
+  const meta = payload.usageMetadata;
+  return {
+    rascunho: validarSaidaTextoJson(textoBruto, "gemini"),
+    uso: {
+      tokensEntradaIA: normalizarTokens(meta?.promptTokenCount),
+      tokensSaidaIA: normalizarTokens(meta?.candidatesTokenCount),
+      tokensCacheIA: normalizarTokens(meta?.cachedContentTokenCount),
+      tokensRaciocinioIA: normalizarTokens(meta?.thoughtsTokenCount),
+      tokensTotalIA: normalizarTokens(meta?.totalTokenCount),
+    },
+  };
 }
 
 /** Executa chamada estruturada à OpenAI usando json_schema strict */
@@ -264,7 +307,7 @@ async function chamarOpenAi(
   system: string,
   user: string,
   timeoutMs: number,
-): Promise<AiDraft> {
+): Promise<RespostaProvedorIA> {
   const modelo = process.env["OPENAI_MODEL"]?.trim() || MODELO_PADRAO_OPENAI;
   const url =
     process.env["OPENAI_BASE_URL"]?.trim() || "https://api.openai.com/v1/chat/completions";
@@ -333,9 +376,18 @@ async function chamarOpenAi(
     );
   }
 
-  let payload: { choices?: Array<{ message?: { content?: string } }> };
+  let payload: {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      total_tokens?: number;
+      prompt_tokens_details?: { cached_tokens?: number };
+      completion_tokens_details?: { reasoning_tokens?: number };
+    };
+  };
   try {
-    payload = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    payload = (await res.json()) as typeof payload;
   } catch {
     throw new ErroCamadaIA(
       "RESPOSTA_INVALIDA",
@@ -345,7 +397,17 @@ async function chamarOpenAi(
   }
 
   const textoBruto = payload.choices?.[0]?.message?.content ?? "";
-  return validarSaidaTextoJson(textoBruto, "openai");
+  const usage = payload.usage;
+  return {
+    rascunho: validarSaidaTextoJson(textoBruto, "openai"),
+    uso: {
+      tokensEntradaIA: normalizarTokens(usage?.prompt_tokens),
+      tokensSaidaIA: normalizarTokens(usage?.completion_tokens),
+      tokensCacheIA: normalizarTokens(usage?.prompt_tokens_details?.cached_tokens),
+      tokensRaciocinioIA: normalizarTokens(usage?.completion_tokens_details?.reasoning_tokens),
+      tokensTotalIA: normalizarTokens(usage?.total_tokens),
+    },
+  };
 }
 
 /**
@@ -388,8 +450,9 @@ export async function callAi(
         modeloIA: modeloGemini,
         latenciaIAMs: Date.now() - inicioGemini,
         status: "ok",
+        ...resposta.uso,
       });
-      return resposta;
+      return resposta.rascunho;
     } catch (erroGemini) {
       const motivoGemini =
         erroGemini instanceof Error ? erroGemini.message : "Erro desconhecido no Gemini.";
@@ -426,8 +489,9 @@ export async function callAi(
           modeloIA: modeloOpenAi,
           latenciaIAMs: Date.now() - inicioOpenAi,
           status: "ok_fallback",
+          ...respostaFallback.uso,
         });
-        return respostaFallback;
+        return respostaFallback.rascunho;
       } catch (erroOpenAi) {
         const motivoOpenAi =
           erroOpenAi instanceof Error ? erroOpenAi.message : "Erro desconhecido na OpenAI.";
@@ -458,8 +522,9 @@ export async function callAi(
       modeloIA: modeloOpenAi,
       latenciaIAMs: Date.now() - inicioOpenAi,
       status: "ok",
+      ...resposta.uso,
     });
-    return resposta;
+    return resposta.rascunho;
   } catch (erroOpenAi) {
     registrarEventoOperacional({
       evento: "chamada_ia_falhou",

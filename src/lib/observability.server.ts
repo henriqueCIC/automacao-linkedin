@@ -27,6 +27,11 @@ export interface EventoOperacional {
   provedorIA?: "gemini" | "openai";
   modeloIA?: string;
   latenciaIAMs?: number;
+  tokensEntradaIA?: number;
+  tokensSaidaIA?: number;
+  tokensCacheIA?: number;
+  tokensRaciocinioIA?: number;
+  tokensTotalIA?: number;
   tentativasGitHub?: number;
   mensagem?: string;
 }
