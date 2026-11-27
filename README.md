@@ -7,8 +7,8 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8_Strict-3178C6?logo=typescript&logoColor=white)](tsconfig.json)
 [![TanStack Start](https://img.shields.io/badge/TanStack_Start-React_19_SSR-FF4154?logo=react&logoColor=white)](package.json)
 [![Supabase](https://img.shields.io/badge/Supabase-Auth_%2B_PostgreSQL_RLS-3ECF8E?logo=supabase&logoColor=white)](src/integrations/supabase/)
-[![Vitest](https://img.shields.io/badge/Vitest-56%2F56_Passing-6E9F18?logo=vitest&logoColor=white)](vitest.config.ts)
-[![Playwright E2E](https://img.shields.io/badge/Playwright_E2E_%2B_QA-8%2F8_Passing-2EAD33?logo=playwright&logoColor=white)](playwright.config.ts)
+[![Vitest](https://img.shields.io/badge/Vitest-75%2F75_Passing-6E9F18?logo=vitest&logoColor=white)](vitest.config.ts)
+[![Playwright E2E](https://img.shields.io/badge/Playwright_E2E_%2B_QA-9%2F9_Passing-2EAD33?logo=playwright&logoColor=white)](playwright.config.ts)
 [![ESLint](https://img.shields.io/badge/ESLint_%2B_Prettier-0_Errors-4B32C3?logo=eslint&logoColor=white)](eslint.config.js)
 [![Gate Global Fase 6](<https://img.shields.io/badge/Gate_Global_Fase_6-Aprovado_(2_Auditorias)-0A66C2>)](docs/AUDITORIAS_ETAPAS_1_A_4.md)
 

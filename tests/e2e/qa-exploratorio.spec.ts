@@ -214,3 +214,43 @@ test("QA 4: valida responsividade mobile (375x667) sem overflow horizontal nas t
     expect(semOverflowHorizontal, `Overflow horizontal detectado em ${rota}`).toBe(true);
   }
 });
+
+test("QA 5: realiza cadastro de nova conta, conecta GitHub via popup OAuth assinado e inspeciona diffs originais no rascunho", async ({
+  page,
+}) => {
+  // 1. Fluxo de criação de conta ("Não tem uma conta? Crie agora")
+  await page.goto("/auth", { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Não tem uma conta? Crie agora" }).click();
+  await page.getByLabel("Seu nome").fill("Camila Dev");
+  await page.getByLabel("E-mail").fill("camila@exemplo.com");
+  await page.getByLabel("Senha").fill("senha-camila-123");
+  await page.getByRole("button", { name: "Criar conta" }).click();
+
+  // Deve entrar direto na sessão recém-criada e exibir o nome cadastrado
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByText("Camila Dev")).toBeVisible();
+  await page.getByRole("button", { name: "Sair" }).click();
+  await expect(page).toHaveURL(/\/auth$/);
+
+  // 2. Entra com a conta Henrique (que inicia sem GitHub conectado) e realiza o fluxo OAuth via popup
+  await autenticarPorEmail(page, "henrique@exemplo.com", "henrique123");
+  await expect(page.getByText("Henrique Barreto")).toBeVisible();
+
+  await page.getByRole("link", { name: "Fontes" }).click();
+  await expect(page).toHaveURL(/\/fontes$/);
+  await expect(page.getByRole("button", { name: "Conectar com o GitHub" })).toBeVisible();
+
+  // Clica em "Conectar com o GitHub": o popup passa pelo redirect OAuth com state HMAC-SHA256 e conecta henriqueCIC
+  await page.getByRole("button", { name: "Conectar com o GitHub" }).click();
+  await expect(page.getByText("GitHub conectado com sucesso.")).toBeVisible();
+  await expect(page.getByText("henriqueCIC")).toBeVisible();
+
+  // 3. Volta ao diário, coleta commits da conta recém-conectada e inspeciona as anotações/diffs originais
+  await page.getByRole("link", { name: /Voltar ao diário/i }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await page.getByRole("button", { name: "Buscar meus commits agora" }).click();
+  await expect(page).toHaveURL(/\/rascunho\/.+$/);
+
+  await page.getByText("Ver as anotações originais").click();
+  await expect(page.getByText(/henriqueCIC\/automacao-linkedin/i)).toBeVisible();
+});
