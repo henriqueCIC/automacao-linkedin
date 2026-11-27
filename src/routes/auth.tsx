@@ -29,6 +29,40 @@ export const Route = createFileRoute("/auth")({
   component: AuthPage,
 });
 
+async function verificarProvedorOAuthSupabase(provider: "google" | "github"): Promise<boolean> {
+  const supabaseUrl = import.meta.env["VITE_SUPABASE_URL"];
+  const supabaseKey = import.meta.env["VITE_SUPABASE_PUBLISHABLE_KEY"];
+  if (!supabaseUrl || !supabaseKey) return false;
+  try {
+    const res = await fetch(`${supabaseUrl}/auth/v1/settings`, {
+      headers: { apikey: supabaseKey },
+    });
+    if (!res.ok) return false;
+    const settings = (await res.json()) as {
+      external?: Record<string, boolean | undefined>;
+    };
+    if (settings.external?.[provider] !== true) {
+      return false;
+    }
+
+    // Mesmo com a flag "enabled: true" no painel do Supabase, o provedor pode estar sem Client Secret
+    // ("Unsupported provider: missing OAuth secret", HTTP 400 em /auth/v1/authorize).
+    const authorizeCheck = await fetch(
+      `${supabaseUrl}/auth/v1/authorize?provider=${encodeURIComponent(provider)}`,
+      { redirect: "manual" },
+    );
+    if (
+      authorizeCheck.type === "opaqueredirect" ||
+      (authorizeCheck.status >= 300 && authorizeCheck.status < 400)
+    ) {
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function AuthPage() {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
@@ -71,6 +105,12 @@ function AuthPage() {
   async function onGoogle() {
     setBusy(true);
     try {
+      const ativo = await verificarProvedorOAuthSupabase("google");
+      if (!ativo) {
+        throw new Error(
+          "O login social com Google não está ativado no painel do Supabase Auth. Entre ou crie sua conta com e-mail e senha abaixo.",
+        );
+      }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
@@ -88,6 +128,12 @@ function AuthPage() {
   async function onGitHub() {
     setBusy(true);
     try {
+      const ativo = await verificarProvedorOAuthSupabase("github");
+      if (!ativo) {
+        throw new Error(
+          "O login social com GitHub não está ativado no Supabase Auth. Entre com e-mail e senha abaixo e depois conecte o GitHub na aba Fontes.",
+        );
+      }
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "github",
         options: {
@@ -118,21 +164,37 @@ function AuthPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <Button variant="outline" className="w-full" onClick={onGoogle} disabled={busy}>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={onGoogle}
+                disabled={busy || loading}
+              >
                 Google
               </Button>
-              <Button variant="outline" className="w-full" onClick={onGitHub} disabled={busy}>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={onGitHub}
+                disabled={busy || loading}
+              >
                 GitHub
               </Button>
             </div>
             <div className="flex items-center gap-3 text-xs text-muted-foreground">
-              <span className="h-px flex-1 bg-border" /> ou com e-mail <span className="h-px flex-1 bg-border" />
+              <span className="h-px flex-1 bg-border" /> ou com e-mail{" "}
+              <span className="h-px flex-1 bg-border" />
             </div>
             <form onSubmit={onSubmit} className="space-y-4">
               {mode === "criar" && (
                 <div className="space-y-1.5">
                   <Label htmlFor="name">Seu nome</Label>
-                  <Input id="name" value={name} onChange={(e) => setName(e.target.value)} />
+                  <Input
+                    id="name"
+                    disabled={busy || loading}
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                  />
                 </div>
               )}
               <div className="space-y-1.5">
@@ -141,6 +203,7 @@ function AuthPage() {
                   id="email"
                   type="email"
                   required
+                  disabled={busy || loading}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                 />
@@ -152,11 +215,12 @@ function AuthPage() {
                   type="password"
                   required
                   minLength={6}
+                  disabled={busy || loading}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                 />
               </div>
-              <Button type="submit" className="w-full" disabled={busy}>
+              <Button type="submit" className="w-full" disabled={busy || loading}>
                 {busy ? "Carregando…" : mode === "entrar" ? "Entrar" : "Criar conta"}
               </Button>
             </form>
@@ -166,7 +230,9 @@ function AuthPage() {
                 className="text-primary hover:underline"
                 onClick={() => setMode(mode === "entrar" ? "criar" : "entrar")}
               >
-                {mode === "entrar" ? "Não tem uma conta? Crie agora" : "Já tem uma conta? Faça login"}
+                {mode === "entrar"
+                  ? "Não tem uma conta? Crie agora"
+                  : "Já tem uma conta? Faça login"}
               </button>
             </div>
           </CardContent>

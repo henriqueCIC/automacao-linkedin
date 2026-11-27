@@ -1,5 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { Button } from "@/components/ui/button";
@@ -24,12 +25,26 @@ export const Route = createFileRoute("/coletas")({
 });
 
 function ColetasPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
+
   const { data: runs, isLoading } = useQuery({
     queryKey: ["collection-history", user?.id],
     queryFn: () => getCollectionHistory(),
     enabled: !!user,
   });
+
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="paper-grain min-h-screen px-4 py-12">
@@ -39,9 +54,7 @@ function ColetasPage() {
         </Button>
         <div className="space-y-2">
           <h1 className="font-display text-3xl font-semibold text-foreground">Coletas</h1>
-          <p className="text-muted-foreground">
-            Histórico de cada busca por commits do GitHub.
-          </p>
+          <p className="text-muted-foreground">Histórico de cada busca por commits do GitHub.</p>
         </div>
 
         <Card className="border-border bg-card shadow-sm">
@@ -64,8 +77,20 @@ function ColetasPage() {
                 >
                   <div className="space-y-1">
                     <div className="flex items-center gap-2">
-                      <Badge variant={run.status === "ok" ? "default" : isCollectionRunning(run.status) ? "secondary" : "destructive"}>
-                        {run.status === "ok" ? "OK" : isCollectionRunning(run.status) ? "Em andamento" : "Erro"}
+                      <Badge
+                        variant={
+                          run.status === "ok"
+                            ? "default"
+                            : isCollectionRunning(run.status)
+                              ? "secondary"
+                              : "destructive"
+                        }
+                      >
+                        {run.status === "ok"
+                          ? "OK"
+                          : isCollectionRunning(run.status)
+                            ? "Em andamento"
+                            : "Erro"}
                       </Badge>
                       <span className="text-sm text-muted-foreground">{run.trigger}</span>
                     </div>
@@ -78,16 +103,14 @@ function ColetasPage() {
                       {isCollectionRunning(run.status)
                         ? "Busca em andamento"
                         : run.status === "erro" && run.commits_found === 0
-                        ? "Busca não concluída"
-                        : run.commits_found === 0
-                        ? "Nenhum commit novo encontrado"
-                        : `${run.commits_found} commit${run.commits_found === 1 ? "" : "s"} em ${
-                            run.repositories?.length ?? 0
-                          } repositório${run.repositories?.length === 1 ? "" : "s"}`}
+                          ? "Busca não concluída"
+                          : run.commits_found === 0
+                            ? "Nenhum commit novo encontrado"
+                            : `${run.commits_found} commit${run.commits_found === 1 ? "" : "s"} em ${
+                                run.repositories?.length ?? 0
+                              } repositório${run.repositories?.length === 1 ? "" : "s"}`}
                     </p>
-                    {run.message && (
-                      <p className="text-sm text-muted-foreground">{run.message}</p>
-                    )}
+                    {run.message && <p className="text-sm text-muted-foreground">{run.message}</p>}
                   </div>
                   {run.post_draft_id && (
                     <Button asChild variant="outline" size="sm">
@@ -101,7 +124,6 @@ function ColetasPage() {
             )}
           </CardContent>
         </Card>
-
       </div>
     </main>
   );

@@ -2,6 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { collectForUser } from "./collect.server";
+import { ehFusoHorarioValido, normalizarFusoHorario } from "./timezone";
 
 export const getGitHubCollectionStatus = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -38,7 +39,9 @@ export const getCollectionHistory = createServerFn({ method: "GET" })
     const { supabase, userId } = context;
     const { data, error } = await supabase
       .from("collection_runs")
-      .select("id, created_at, trigger, status, commits_found, repositories, message, post_draft_id")
+      .select(
+        "id, created_at, trigger, status, commits_found, repositories, message, post_draft_id",
+      )
       .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(50);
@@ -74,14 +77,23 @@ export const getAutomationSettings = createServerFn({ method: "GET" })
       if (insertError) throw new Error(insertError.message);
       return created;
     }
-    if (error) throw new Error((error as { message?: string }).message ?? "Erro ao carregar configurações");
-    return data;
+    if (error) {
+      throw new Error((error as { message?: string }).message ?? "Erro ao carregar configurações");
+    }
+    return {
+      ...data,
+      timezone: normalizarFusoHorario(data.timezone),
+    };
   });
 
 const updateSettingsSchema = z.object({
   enabled: z.boolean(),
-  dailyTime: z.string().regex(/^\d{2}:\d{2}$/),
-  timezone: z.string().min(1),
+  dailyTime: z.string().regex(/^\d{2}:\d{2}$/, "Informe o horário no formato HH:MM."),
+  timezone: z
+    .string()
+    .trim()
+    .min(1)
+    .refine(ehFusoHorarioValido, "Fuso horário inválido. Selecione um fuso IANA suportado."),
   defaultTone: z.enum(["profissional", "narrativo", "tecnico"]),
   maxCommitsPerDay: z.number().int().min(1).max(100),
   notifyDesktop: z.boolean(),
@@ -93,21 +105,19 @@ export const updateAutomationSettings = createServerFn({ method: "POST" })
   .validator(updateSettingsSchema)
   .handler(async ({ data, context }) => {
     const { supabase, userId } = context;
-    const { error } = await supabase
-      .from("automation_settings")
-      .upsert(
-        {
-          user_id: userId,
-          enabled: data.enabled,
-          daily_time: data.dailyTime,
-          timezone: data.timezone,
-          default_tone: data.defaultTone,
-          max_commits_per_day: data.maxCommitsPerDay,
-          notify_desktop: data.notifyDesktop,
-          notify_email: data.notifyEmail,
-        },
-        { onConflict: "user_id" },
-      );
+    const { error } = await supabase.from("automation_settings").upsert(
+      {
+        user_id: userId,
+        enabled: data.enabled,
+        daily_time: data.dailyTime,
+        timezone: data.timezone,
+        default_tone: data.defaultTone,
+        max_commits_per_day: data.maxCommitsPerDay,
+        notify_desktop: data.notifyDesktop,
+        notify_email: data.notifyEmail,
+      },
+      { onConflict: "user_id" },
+    );
     if (error) throw new Error(error.message);
     return { ok: true };
   });

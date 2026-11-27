@@ -1,6 +1,6 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +14,10 @@ export const Route = createFileRoute("/fontes")({
       { title: "Fontes de alterações" },
       { name: "description", content: "Conecte o GitHub para coletar commits automaticamente." },
       { property: "og:title", content: "Fontes de alterações" },
-      { property: "og:description", content: "Conecte o GitHub para coletar commits automaticamente." },
+      {
+        property: "og:description",
+        content: "Conecte o GitHub para coletar commits automaticamente.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -23,9 +26,14 @@ export const Route = createFileRoute("/fontes")({
 });
 
 function FontesPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [message, setMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
 
   const { data: status, isLoading } = useQuery({
     queryKey: ["github-status", user?.id],
@@ -62,6 +70,14 @@ function FontesPage() {
     onError: (err: Error) => setMessage(err.message),
   });
 
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
+
   return (
     <main className="paper-grain min-h-screen px-4 py-12">
       <div className="mx-auto max-w-2xl space-y-8">
@@ -86,9 +102,8 @@ function FontesPage() {
           <CardHeader>
             <CardTitle className="font-display text-xl text-foreground">GitHub</CardTitle>
             <CardDescription className="text-muted-foreground">
-              O app consulta seus commits em todos os repositórios onde você commitou hoje.
-              Arquivos locais do VS Code não podem ser lidos pelo navegador, por isso a fonte é
-              o GitHub.
+              O app consulta seus commits em todos os repositórios onde você commitou hoje. Arquivos
+              locais do VS Code não podem ser lidos pelo navegador, por isso a fonte é o GitHub.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -97,7 +112,10 @@ function FontesPage() {
             ) : status?.connected ? (
               <>
                 <p className="text-foreground">
-                  Conta conectada: <span className="font-medium text-primary">{status.accountLogin ?? "(desconhecido)"}</span>
+                  Conta conectada:{" "}
+                  <span className="font-medium text-primary">
+                    {status.accountLogin ?? "(desconhecido)"}
+                  </span>
                 </p>
                 {status.reconnectRequired && (
                   <Alert variant="destructive" className="border-destructive/30 bg-card">
@@ -149,12 +167,11 @@ function FontesPage() {
           </CardHeader>
           <CardContent>
             <p className="text-muted-foreground">
-              No futuro será possível usar uma extensão do VS Code ou importar atividade manualmente.
-              Por enquanto, a fonte automática é o GitHub.
+              No futuro será possível usar uma extensão do VS Code ou importar atividade
+              manualmente. Por enquanto, a fonte automática é o GitHub.
             </p>
           </CardContent>
         </Card>
-
       </div>
     </main>
   );
@@ -162,18 +179,12 @@ function FontesPage() {
 
 function waitForOAuthCompletion(popup: Window): Promise<void> {
   return new Promise((resolve, reject) => {
-    let poll: number | undefined;
-    const cleanup = () => {
-      window.removeEventListener("message", onMessage);
-      if (poll !== undefined) window.clearInterval(poll);
-    };
     const onMessage = (event: MessageEvent) => {
       if (
         event.origin !== window.location.origin ||
         event.source !== popup ||
         event.data?.connectorId !== "github" ||
-        (event.data?.type !== "githubOAuthComplete" &&
-          event.data?.type !== "githubOAuthFailed")
+        (event.data?.type !== "githubOAuthComplete" && event.data?.type !== "githubOAuthFailed")
       )
         return;
       cleanup();
@@ -184,11 +195,15 @@ function waitForOAuthCompletion(popup: Window): Promise<void> {
         reject(new Error("A autorização com o GitHub foi cancelada ou falhou."));
       }
     };
-    window.addEventListener("message", onMessage);
-    poll = window.setInterval(() => {
+    const poll = window.setInterval(() => {
       if (!popup.closed) return;
       cleanup();
       reject(new Error("A janela de autorização foi fechada antes de terminar."));
     }, 500);
+    const cleanup = () => {
+      window.removeEventListener("message", onMessage);
+      window.clearInterval(poll);
+    };
+    window.addEventListener("message", onMessage);
   });
 }

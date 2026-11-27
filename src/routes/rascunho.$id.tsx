@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -46,7 +46,8 @@ export const Route = createFileRoute("/rascunho/$id")({
 
 const STATUS_LABEL: Record<string, string> = {
   rascunho: "Aguardando sua revisão",
-  aprovado: "Aprovado por você",
+  aprovado: "Aguardando envio (aprovado)",
+  publicando: "Em publicação / confirmar no LinkedIn",
   rejeitado: "Rejeitado",
   publicado: "Publicado no LinkedIn",
 };
@@ -64,19 +65,25 @@ function DraftPage() {
   const [content, setContent] = useState("");
   const [feedback, setFeedback] = useState("");
   const [dirty, setDirty] = useState(false);
+  const campoAdaptacaoRef = useRef<HTMLTextAreaElement | null>(null);
 
   useEffect(() => {
     if (!loading && !session) void navigate({ to: "/auth" });
   }, [loading, session, navigate]);
 
+  const userId = session?.user.id;
+
   const draft = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["draft", id],
+    enabled: Boolean(userId),
+    queryKey: ["draft", userId, id],
     queryFn: async () => {
       const { data, error } = await supabase
         .from("post_drafts")
-        .select("id, summary, content, status, tone, feedback, published_at, day_entries(entry_date, raw_notes)")
+        .select(
+          "id, summary, content, status, tone, feedback, published_at, day_entries(entry_date, raw_notes)",
+        )
         .eq("id", id)
+        .eq("user_id", userId!)
         .single();
       if (error) throw new Error(error.message);
       return data;
@@ -84,8 +91,8 @@ function DraftPage() {
   });
 
   const linkedIn = useQuery({
-    enabled: Boolean(session),
-    queryKey: ["linkedin-status"],
+    enabled: Boolean(userId),
+    queryKey: ["linkedin-status", userId],
     queryFn: () => runStatus({}),
   });
 
@@ -95,27 +102,51 @@ function DraftPage() {
 
   const setStatus = useMutation({
     mutationFn: async (status: "aprovado" | "rejeitado" | "rascunho") => {
+      const textoLimpo = content.trim();
+      if (status !== "rejeitado") {
+        if (textoLimpo.length < 20) {
+          throw new Error(
+            "O texto do post deve ter pelo menos 20 caracteres antes de salvar ou aprovar.",
+          );
+        }
+        if (textoLimpo.length > 3000) {
+          throw new Error("O texto do post não pode ultrapassar 3.000 caracteres no LinkedIn.");
+        }
+      }
       const { error } = await supabase
         .from("post_drafts")
         .update({
-          content,
+          content: textoLimpo || content,
           status,
           approved_at: status === "aprovado" ? new Date().toISOString() : null,
         })
-        .eq("id", id);
+        .eq("id", id)
+        .eq("user_id", userId!);
       if (error) throw new Error(error.message);
+      if (status === "rejeitado") {
+        // Libera os commits vistos para permitir nova busca e geração de rascunho diferente no menu principal
+        await supabase.from("seen_commits").delete().eq("user_id", userId!);
+      }
       return status;
     },
     onSuccess: async (status) => {
       setDirty(false);
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
+      if (status === "rejeitado") {
+        toast.info(
+          "Rascunho rejeitado. Conte abaixo como gostaria de adaptá-lo para gerarmos um re-rascunho.",
+        );
+        setTimeout(() => {
+          campoAdaptacaoRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+          campoAdaptacaoRef.current?.focus();
+        }, 80);
+        return;
+      }
       toast.success(
         status === "aprovado"
           ? "Aprovado. Agora você pode publicar quando quiser."
-          : status === "rejeitado"
-            ? "Rascunho rejeitado."
-            : "Alterações salvas.",
+          : "Alterações salvas.",
       );
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Algo deu errado."),
@@ -123,13 +154,19 @@ function DraftPage() {
 
   const refine = useMutation({
     mutationFn: async () => {
-      await supabase.from("post_drafts").update({ content }).eq("id", id);
+      const { error } = await supabase
+        .from("post_drafts")
+        .update({ content })
+        .eq("id", id)
+        .eq("user_id", userId!);
+      if (error) throw new Error(error.message);
       return runRefine({ data: { draftId: id, feedback } });
     },
     onSuccess: async () => {
       setFeedback("");
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
+      await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
       setDirty(false);
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
       toast.success("Nova versão gerada com o seu complemento.");
     },
     onError: (error) => toast.error(error instanceof Error ? error.message : "Algo deu errado."),
@@ -138,7 +175,7 @@ function DraftPage() {
   const publish = useMutation({
     mutationFn: () => runPublish({ data: { draftId: id } }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["draft", id] });
+      await queryClient.invalidateQueries({ queryKey: ["draft", userId, id] });
       await queryClient.invalidateQueries({ queryKey: ["post_drafts"] });
       toast.success("Publicado no LinkedIn.");
     },
@@ -146,7 +183,7 @@ function DraftPage() {
       toast.error(error instanceof Error ? error.message : "Não foi possível publicar."),
   });
 
-  if (loading || draft.isLoading) {
+  if (loading || !session || draft.isLoading) {
     return (
       <main className="paper-grain flex min-h-screen items-center justify-center">
         <p className="text-sm text-muted-foreground">Carregando…</p>
@@ -168,6 +205,7 @@ function DraftPage() {
   const status = draft.data.status as string;
   const entry = draft.data.day_entries as { entry_date?: string; raw_notes?: string } | null;
   const approved = status === "aprovado";
+  const rejected = status === "rejeitado";
   const published = status === "publicado";
   const connected = linkedIn.data?.connected === true;
 
@@ -226,6 +264,7 @@ function DraftPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             <Textarea
+              aria-label="Texto do post"
               rows={14}
               value={content}
               disabled={published}
@@ -255,7 +294,10 @@ function DraftPage() {
                   >
                     Salvar alterações
                   </Button>
-                  <Button onClick={() => setStatus.mutate("aprovado")} disabled={setStatus.isPending}>
+                  <Button
+                    onClick={() => setStatus.mutate("aprovado")}
+                    disabled={setStatus.isPending}
+                  >
                     {approved ? "Aprovar novamente" : "Aprovar este texto"}
                   </Button>
                   <Button
@@ -273,28 +315,50 @@ function DraftPage() {
         </Card>
 
         {!published && (
-          <Card>
+          <Card className={rejected ? "border-primary bg-primary/5 shadow-md" : undefined}>
             <CardHeader>
-              <CardTitle className="font-display text-2xl">Complementar o que foi feito</CardTitle>
+              <CardTitle className="font-display text-2xl">
+                {rejected
+                  ? "Como podemos adaptar este rascunho? (Re-rascunho)"
+                  : "Complementar o que foi feito"}
+              </CardTitle>
               <CardDescription>
-                Conte o que ficou de fora ou o que deve mudar e uma nova versão é gerada para nova
-                revisão.
+                {rejected
+                  ? "Você rejeitou a versão acima. Explique como ela poderia ser adaptada ou o que você quer destacar — faremos um novo re-rascunho com base nas suas orientações e na leitura original dos commits/anotações."
+                  : "Conte o que ficou de fora ou o que deve mudar e uma nova versão é gerada para nova revisão."}
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <Textarea
+                ref={campoAdaptacaoRef}
+                aria-label="Complementar o que foi feito"
                 rows={4}
-                placeholder="Ex.: faltou citar que a entrega foi em equipe e deixe o tom menos formal."
+                placeholder={
+                  rejected
+                    ? "Ex.: Adapte para um tom mais direto em tópicos, focando no problema real que resolvi nos commits e sem introdução longa."
+                    : "Ex.: faltou citar que a entrega foi em equipe e deixe o tom menos formal."
+                }
                 value={feedback}
                 onChange={(e) => setFeedback(e.target.value)}
               />
-              <Button
-                variant="secondary"
-                onClick={() => refine.mutate()}
-                disabled={refine.isPending || feedback.trim().length < 5}
-              >
-                {refine.isPending ? "Reescrevendo…" : "Gerar nova versão"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-3">
+                <Button
+                  variant={rejected ? "default" : "secondary"}
+                  onClick={() => refine.mutate()}
+                  disabled={refine.isPending || feedback.trim().length < 5}
+                >
+                  {refine.isPending
+                    ? "Gerando re-rascunho…"
+                    : rejected
+                      ? "Fazer re-rascunho com base nisso"
+                      : "Gerar nova versão"}
+                </Button>
+                {rejected && (
+                  <Button asChild variant="outline">
+                    <Link to="/">Voltar ao menu e buscar commits novamente</Link>
+                  </Button>
+                )}
+              </div>
             </CardContent>
           </Card>
         )}

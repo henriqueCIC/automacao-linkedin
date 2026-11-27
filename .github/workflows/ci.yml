@@ -1,0 +1,64 @@
+name: CI — Qualidade, Testes e Build
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verificacao:
+    name: Lint, Typecheck, Testes, Build e E2E
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CI: "true"
+      VITE_SUPABASE_URL: "https://ci-isolado.supabase.co"
+      VITE_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_isolado"
+      SUPABASE_URL: "https://ci-isolado.supabase.co"
+      SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_isolado"
+      ENCRYPTION_SECRET: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc="
+
+    steps:
+      - name: Checkout do repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js 22 LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Instalar dependências travadas
+        run: npm ci
+
+      - name: Verificar ESLint e Prettier
+        run: npm run lint
+
+      - name: Verificar tipagem estrita TypeScript
+        run: npm run typecheck
+
+      - name: Executar suíte unitária e de integração (Vitest)
+        run: npm test
+
+      - name: Compilar cliente e servidor de produção
+        run: npm run build
+
+      - name: Instalar navegador Chromium do Playwright
+        run: npx playwright install --with-deps chromium
+
+      - name: Executar suíte E2E com serviços simulados (Playwright)
+        run: npm run test:e2e
+
+      - name: Publicar relatório e traces E2E como artefato do CI
+        uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-e2e-evidencias
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

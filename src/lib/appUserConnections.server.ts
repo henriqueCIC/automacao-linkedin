@@ -48,27 +48,30 @@ export async function getConnectionKeyForUser(userId: string, connectorId: strin
 
 export async function markReconnectRequired(userId: string, connectorId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("app_user_connections")
     .update({ reconnect_required: true })
     .eq("user_id", userId)
     .eq("connector_id", connectorId);
+  if (error) throw error;
 }
 
 export async function saveAccountLogin(userId: string, connectorId: string, login: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("app_user_connections")
     .update({ account_login: login })
     .eq("user_id", userId)
     .eq("connector_id", connectorId);
+  if (error) throw error;
 }
 
 export async function deleteConnectionForUser(userId: string, connectorId: string) {
   const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-  await supabaseAdmin
+  const { error } = await supabaseAdmin
     .from("app_user_connections")
     .delete()
     .eq("user_id", userId)
     .eq("connector_id", connectorId);
+  if (error) throw error;
 }

@@ -1,21 +1,17 @@
-# Routes
+# Rotas da aplicação
 
-TanStack Start uses **file-based routing**. Every `.tsx` file in this directory
-defines a route. Do **not** create `src/pages/`, `src/routes/_app/index.tsx`, or
-`app/layout.tsx` — those are Next.js / Remix conventions. The only root layout
-is `src/routes/__root.tsx`.
+As telas ficam em `src/routes/`. O arquivo `__root.tsx` contém a estrutura compartilhada e mantém `<Outlet />` para renderizar as rotas filhas.
 
-## Conventions
+| Arquivo | Caminho | Responsabilidade |
+| --- | --- | --- |
+| `index.tsx` | `/` | Diário e rascunhos |
+| `auth.tsx` | `/auth` | Entrada e cadastro |
+| `fontes.tsx` | `/fontes` | Conexão GitHub |
+| `configuracoes.tsx` | `/configuracoes` | Preferências da coleta |
+| `coletas.tsx` | `/coletas` | Histórico de execuções |
+| `rascunho.$id.tsx` | `/rascunho/$id` | Revisão e aprovação |
+| `publicacoes.tsx` | `/publicacoes` | Publicação e histórico |
+| `oauth.github.return.tsx` | `/oauth/github/return` | Retorno da autorização GitHub |
+| `api/public/coletar.ts` | `/api/public/coletar` | Recepção do disparo autenticado do cron |
 
-| File | URL |
-| --- | --- |
-| `index.tsx` | `/` |
-| `about.tsx` | `/about` |
-| `users/index.tsx` | `/users` |
-| `users/$id.tsx` | `/users/:id` (dynamic — bare `$`, no curly braces) |
-| `posts/{-$category}.tsx` | `/posts/:category?` (optional segment) |
-| `files/$.tsx` | `/files/*` (splat — read via `_splat` param, never `*`) |
-| `_layout.tsx` | layout route (renders children via `<Outlet />`) |
-| `__root.tsx` | app shell — wraps every page; preserve `<Outlet />` |
-
-`routeTree.gen.ts` is auto-generated. Don't edit it by hand.
+`src/routeTree.gen.ts` é gerado automaticamente. Não editar manualmente. Os nomes técnicos de rotas e contratos foram preservados nesta revisão.

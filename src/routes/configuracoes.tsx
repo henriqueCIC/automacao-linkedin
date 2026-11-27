@@ -1,33 +1,40 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { getAutomationSettings, updateAutomationSettings } from "@/lib/collect.functions";
+import { FUSOS_HORARIOS_SUPORTADOS, normalizarFusoHorario } from "@/lib/timezone";
 import { useAuth } from "@/hooks/useAuth";
 
-const TIMEZONES = [
-  "America/Bahia",
-  "America/Sao_Paulo",
-  "America/Rio_de_Janeiro",
-  "America/Fortaleza",
-  "America/Manaus",
-  "America/Recife",
-];
+const TIMEZONES = FUSOS_HORARIOS_SUPORTADOS;
 
 export const Route = createFileRoute("/configuracoes")({
   head: () => ({
     meta: [
       { title: "Configurações da automação" },
-      { name: "description", content: "Configure horário, fuso e estilo da coleta automática de commits." },
+      {
+        name: "description",
+        content: "Configure horário, fuso e estilo da coleta automática de commits.",
+      },
       { property: "og:title", content: "Configurações da automação" },
-      { property: "og:description", content: "Configure horário, fuso e estilo da coleta automática de commits." },
+      {
+        property: "og:description",
+        content: "Configure horário, fuso e estilo da coleta automática de commits.",
+      },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
@@ -35,15 +42,22 @@ export const Route = createFileRoute("/configuracoes")({
   component: ConfiguracoesPage,
 });
 
+type TomAutomacao = "profissional" | "narrativo" | "tecnico";
+
 function ConfiguracoesPage() {
-  const { user } = useAuth();
+  const { user, session, loading } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    if (!loading && !session) void navigate({ to: "/auth" });
+  }, [loading, session, navigate]);
   const [form, setForm] = useState({
     enabled: true,
     dailyTime: "18:00",
     timezone: "America/Bahia",
-    defaultTone: "profissional" as const,
+    defaultTone: "profissional" as TomAutomacao,
     maxCommitsPerDay: 15,
     notifyDesktop: true,
     notifyEmail: false,
@@ -60,8 +74,8 @@ function ConfiguracoesPage() {
     setForm({
       enabled: settings.enabled,
       dailyTime: settings.daily_time.slice(0, 5),
-      timezone: settings.timezone,
-      defaultTone: settings.default_tone as typeof form.defaultTone,
+      timezone: normalizarFusoHorario(settings.timezone),
+      defaultTone: settings.default_tone as TomAutomacao,
       maxCommitsPerDay: settings.max_commits_per_day,
       notifyDesktop: settings.notify_desktop,
       notifyEmail: settings.notify_email,
@@ -76,12 +90,23 @@ function ConfiguracoesPage() {
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     },
+    onError: (err: Error) => {
+      toast.error(err.message || "Não foi possível salvar as configurações.");
+    },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     updateMutation.mutate({ data: form });
   };
+
+  if (loading || !session) {
+    return (
+      <main className="paper-grain flex min-h-screen items-center justify-center">
+        <p className="text-sm text-muted-foreground">Carregando…</p>
+      </main>
+    );
+  }
 
   return (
     <main className="paper-grain min-h-screen px-4 py-12">
@@ -99,13 +124,17 @@ function ConfiguracoesPage() {
         {saved && (
           <Alert className="border-border bg-card">
             <AlertTitle className="text-foreground">Salvo</AlertTitle>
-            <AlertDescription className="text-muted-foreground">As configurações foram atualizadas.</AlertDescription>
+            <AlertDescription className="text-muted-foreground">
+              As configurações foram atualizadas.
+            </AlertDescription>
           </Alert>
         )}
 
         <Card className="border-border bg-card shadow-sm">
           <CardHeader>
-            <CardTitle className="font-display text-xl text-foreground">Coleta automática</CardTitle>
+            <CardTitle className="font-display text-xl text-foreground">
+              Coleta automática
+            </CardTitle>
             <CardDescription className="text-muted-foreground">
               Uma vez por dia o app consulta seus commits mais recentes do GitHub e gera um
               rascunho. A publicação no LinkedIn só acontece depois da sua revisão e confirmação.
@@ -119,7 +148,9 @@ function ConfiguracoesPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="enabled">Ativada</Label>
-                    <p className="text-sm text-muted-foreground">Pausa e retoma a coleta automática.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Pausa e retoma a coleta automática.
+                    </p>
                   </div>
                   <Switch
                     id="enabled"
@@ -164,7 +195,7 @@ function ConfiguracoesPage() {
                   <Select
                     value={form.defaultTone}
                     onValueChange={(v) =>
-                      setForm((f) => ({ ...f, defaultTone: v as typeof form.defaultTone }))
+                      setForm((f) => ({ ...f, defaultTone: v as TomAutomacao }))
                     }
                   >
                     <SelectTrigger id="defaultTone" className="bg-background">
@@ -210,7 +241,9 @@ function ConfiguracoesPage() {
                 <div className="flex items-center justify-between">
                   <div className="space-y-0.5">
                     <Label htmlFor="notifyEmail">Lembrete por e-mail</Label>
-                    <p className="text-sm text-muted-foreground">Envia um aviso quando o rascunho ficar pronto.</p>
+                    <p className="text-sm text-muted-foreground">
+                      Envia um aviso quando o rascunho ficar pronto.
+                    </p>
                   </div>
                   <Switch
                     id="notifyEmail"
@@ -230,7 +263,6 @@ function ConfiguracoesPage() {
             )}
           </CardContent>
         </Card>
-
       </div>
     </main>
   );

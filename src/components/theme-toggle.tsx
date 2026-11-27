@@ -10,7 +10,14 @@ export function ThemeToggle() {
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button variant="ghost" size="icon" onClick={toggleTheme} aria-label={label} aria-pressed={theme === "dark"} title={label}>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={toggleTheme}
+            aria-label={label}
+            aria-pressed={theme === "dark"}
+            title={label}
+          >
             {theme === "dark" ? <Sun /> : <Moon />}
           </Button>
         </TooltipTrigger>

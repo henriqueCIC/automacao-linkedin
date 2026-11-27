@@ -8,8 +8,8 @@ import {
   saveConnectionKeyForUser,
   getConnectionForUser,
   deleteConnectionForUser,
-  saveAccountLogin,
 } from "./appUserConnections.server";
+import { gerarStateOAuth, validarStateOAuth } from "./oauthState.server";
 
 function getGitHubCredentials() {
   const clientId = process.env["GITHUB_CLIENT_ID"];
@@ -36,26 +36,40 @@ export const startGitHubOAuth = createServerFn({ method: "POST" })
   .handler(async ({ context }) => {
     const { clientId } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
-    const state = Buffer.from(JSON.stringify({ userId: context.userId, ts: Date.now() })).toString("base64");
+    const state = gerarStateOAuth(context.userId);
     const params = new URLSearchParams({
       client_id: clientId,
       redirect_uri: returnUrl,
       scope: GITHUB_SCOPES.join(" "),
       state,
     });
-    const authorizationUrl = `https://github.com/login/oauth/authorize?${params.toString()}`;
+    const authorizeBase =
+      process.env["GITHUB_OAUTH_AUTHORIZE_URL"]?.trim() ||
+      "https://github.com/login/oauth/authorize";
+    const authorizationUrl = `${authorizeBase}?${params.toString()}`;
     return { authorizationUrl };
   });
 
 export const completeGitHubOAuth = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator(z.object({ code: z.string() }))
+  .validator(
+    z.object({
+      code: z.string().trim().min(1, "Código de autorização do GitHub ausente."),
+      state: z.string().trim().min(1, "Estado de segurança OAuth ausente."),
+    }),
+  )
   .handler(async ({ data, context }) => {
+    // Valida assinatura HMAC-SHA256, correspondência de userId e janela de expiração (S02)
+    validarStateOAuth(data.state, context.userId);
+
     const { clientId, clientSecret } = getGitHubCredentials();
     const returnUrl = buildReturnUrl();
 
-    // Troca o código pelo access_token na API oficial do GitHub
-    const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
+    // Troca o código pelo access_token na API oficial do GitHub (ou endpoint simulado local)
+    const tokenEndpoint =
+      process.env["GITHUB_OAUTH_TOKEN_URL"]?.trim() ||
+      "https://github.com/login/oauth/access_token";
+    const tokenRes = await fetch(tokenEndpoint, {
       method: "POST",
       headers: {
         Accept: "application/json",
@@ -70,20 +84,28 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
     });
 
     if (!tokenRes.ok) {
-      const errBody = await tokenRes.text();
-      console.error("GitHub token exchange failed:", errBody);
+      console.error(`Falha na troca do código de autorização do GitHub [HTTP ${tokenRes.status}]`);
       throw new Error("Falha ao trocar código de autorização com o GitHub.");
     }
 
-    const tokenData = (await tokenRes.json()) as { access_token?: string; error?: string; error_description?: string };
+    const tokenData = (await tokenRes.json()) as {
+      access_token?: string;
+      error?: string;
+      error_description?: string;
+    };
     if (tokenData.error || !tokenData.access_token) {
-      throw new Error(tokenData.error_description || tokenData.error || "Token do GitHub não retornado.");
+      throw new Error(
+        tokenData.error_description || tokenData.error || "Token do GitHub não retornado.",
+      );
     }
 
     // Busca o login do usuário no GitHub
+    const githubApiBase = (
+      process.env["GITHUB_API_BASE_URL"]?.trim() || "https://api.github.com"
+    ).replace(/\/+$/, "");
     let accountLogin: string | null = null;
     try {
-      const userRes = await fetch("https://api.github.com/user", {
+      const userRes = await fetch(`${githubApiBase}/user`, {
         headers: {
           Authorization: `Bearer ${tokenData.access_token}`,
           Accept: "application/vnd.github.v3+json",
@@ -95,10 +117,15 @@ export const completeGitHubOAuth = createServerFn({ method: "POST" })
         accountLogin = userInfo.login ?? null;
       }
     } catch (e) {
-      console.warn("Could not fetch user login:", e);
+      console.warn("Não foi possível consultar o login do usuário:", e);
     }
 
-    await saveConnectionKeyForUser(context.userId, GITHUB_CONNECTOR_ID, tokenData.access_token, accountLogin);
+    await saveConnectionKeyForUser(
+      context.userId,
+      GITHUB_CONNECTOR_ID,
+      tokenData.access_token,
+      accountLogin,
+    );
     return { ok: true };
   });
 
